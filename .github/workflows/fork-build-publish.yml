@@ -28,6 +28,7 @@ jobs:
         run: |
           ./scripts/Apply-ForkPatches.ps1
           ./scripts/Apply-ForkStatusPatches.ps1
+          ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
 
       - name: Verify retainer greeting fix
         shell: pwsh
@@ -43,6 +44,7 @@ jobs:
           $bridge = Get-Content ./GatherBuddy/Crafting/CraftingGatherBridge.cs -Raw
           $queue = Get-Content ./GatherBuddy/Crafting/CraftingQueueProcessor.cs -Raw
           $status = Get-Content ./GatherBuddy/Gui/CraftingStatusWindow.cs -Raw
+          $support = Get-Content ./GatherBuddy/Crafting/ForkVulcanWorkflowSupport.cs -Raw
 
           if ($bridge -notmatch 'Gather completion reached for queue mode; validating material plan') {
             throw 'Material preflight guard is missing after patch step.'
@@ -55,6 +57,12 @@ jobs:
           }
           if ($bridge -notmatch 'WaitingForManualMaterials') {
             throw 'Manual-material Resume support is missing after patch step.'
+          }
+          if ($bridge -notmatch 'TryAddAutoGatherTarget') {
+            throw 'Real-node AutoGather filtering is missing after patch step.'
+          }
+          if ($bridge -notmatch 'TryRegisterGatherRecovery') {
+            throw 'Bounded gather-recovery guard is missing after patch step.'
           }
           if ($queue -notmatch 'returning to material acquisition') {
             throw 'Missing-material craft recovery is missing after patch step.'
@@ -70,6 +78,12 @@ jobs:
           }
           if ($status -notmatch 'Recent activity') {
             throw 'Recent activity panel is missing after patch step.'
+          }
+          if ($support -notmatch 'NodeList.Count > 0' -or $support -notmatch 'FishingSpots.Count > 0') {
+            throw 'Concrete gathering-location validation is missing.'
+          }
+          if ($support -notmatch 'MaxUnchangedGatherRecoveries' -or $support -notmatch 'infinite retry/honk loop') {
+            throw 'Infinite gather/honk loop protection is missing.'
           }
 
       - name: Set plugin version
@@ -131,7 +145,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: useful-retainer preflight skips pointless bell trips; manual-drop pauses use a dedicated state with live inventory counts; gathering shows each target and remaining quantity; retainer greetings auto-dismiss; robust material acquisition and Recent activity remain enabled.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: crafting AutoGather now requires a real node/fishing spot, preventing monster drops or orphan GatheringItem rows from entering gather lists; gather recovery is bounded so AutoGather can never enter an infinite rebuild/honk loop. Includes useful-retainer preflight, live manual/drop blockers, gather targets, Recent activity, and retainer greeting auto-dismiss.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
