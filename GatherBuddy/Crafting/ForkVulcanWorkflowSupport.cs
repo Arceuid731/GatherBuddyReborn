@@ -31,6 +31,7 @@ public sealed record VulcanMaterialBlocker(
     MaterialSource Source)
 {
     public int Missing => Math.Max(0, Needed - Available);
+    public bool Complete => Missing == 0;
 }
 
 public sealed record VulcanGatherTarget(
@@ -79,6 +80,15 @@ public static class ForkVulcanWorkflowSupport
                 return _manualBlockers.ToArray();
         }
     }
+
+    /// <summary>
+    /// Same blocker set as when the queue paused, but bag counts are re-read on
+    /// every UI frame so manually looted/withdrawn items are reflected immediately.
+    /// </summary>
+    public static IReadOnlyList<VulcanMaterialBlocker> GetLiveManualBlockers()
+        => ManualBlockers
+            .Select(blocker => blocker with { Available = GetInventoryCount(blocker.ItemId) })
+            .ToList();
 
     public static void Reset()
     {
@@ -315,12 +325,13 @@ public static class ForkVulcanWorkflowSupport
 
     public static string BuildPauseReason(IReadOnlyList<VulcanMaterialBlocker> blockers)
     {
-        if (blockers.Count == 0)
-            return string.Empty;
+        var outstanding = blockers.Where(blocker => !blocker.Complete).ToList();
+        if (outstanding.Count == 0)
+            return "Manual materials acquired. Press Resume to continue.";
 
-        var preview = string.Join(", ", blockers.Take(3).Select(blocker => $"{blocker.ItemName} x{blocker.Missing}"));
-        if (blockers.Count > 3)
-            preview += $", +{blockers.Count - 3} more";
+        var preview = string.Join(", ", outstanding.Take(3).Select(blocker => $"{blocker.ItemName} x{blocker.Missing}"));
+        if (outstanding.Count > 3)
+            preview += $", +{outstanding.Count - 3} more";
         return $"Manual materials required: {preview}. Acquire or withdraw them, then press Resume.";
     }
 
