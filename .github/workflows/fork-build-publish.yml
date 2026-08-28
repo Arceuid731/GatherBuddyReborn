@@ -1,0 +1,120 @@
+name: Fork Build & Publish Dalamud Repo
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Apply fork patches
+        shell: pwsh
+        run: ./scripts/Apply-ForkPatches.ps1
+
+      - name: Verify retainer greeting fix
+        shell: pwsh
+        run: |
+          $source = Get-Content ./GatherBuddy/Crafting/RetainerTaskExecutor.cs -Raw
+          if ($source -notmatch 'Retainer greeting visible, dismissing') {
+            throw 'Retainer greeting fix is missing after patch step.'
+          }
+
+      - name: Set plugin version
+        shell: pwsh
+        run: |
+          # Upstream latest release at fork time is 7.5.5.0. Keep our fourth
+          # component monotonic so Dalamud prefers the fork over that build.
+          $version = "7.5.5.${{ github.run_number }}"
+          "PLUGIN_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Building GatherBuddy Reborn fork $version"
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download Dalamud latest
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile latest.zip
+          Expand-Archive -Force latest.zip -DestinationPath "$env:AppData\XIVLauncher\addon\Hooks\dev"
+
+      - name: Restore NuGet packages
+        run: dotnet restore GatherBuddy/GatherBuddy.csproj
+
+      - name: Build plugin
+        run: >-
+          dotnet build --no-restore -c Release GatherBuddy/GatherBuddy.csproj
+          -p:AssemblyVersion=${{ env.PLUGIN_VERSION }}
+          -p:FileVersion=${{ env.PLUGIN_VERSION }}
+          -p:PackageVersion=${{ env.PLUGIN_VERSION }}
+          -p:InformationalVersion=${{ env.PLUGIN_VERSION }}
+          --output .\build
+
+      - name: Build raphael-cli
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/KonaeAkira/raphael-rs.git raphael-rs-temp
+          Push-Location raphael-rs-temp
+          cargo build --release --package raphael-cli
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to build raphael-cli' }
+          Pop-Location
+          Copy-Item .\raphael-rs-temp\target\release\raphael-cli.exe .\build\raphael-cli.exe -Force
+          Remove-Item -Recurse -Force raphael-rs-temp
+
+      - name: Build Dalamud repository payload
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path .\build\* -DestinationPath .\dist\GatherBuddyReborn.zip -Force
+
+          $manifest = Get-Content .\GatherBuddy\GatherBuddyReborn.json -Raw | ConvertFrom-Json
+          $manifest.RepoUrl = 'https://github.com/Arceuid731/GatherBuddyReborn'
+          $manifest | Add-Member -NotePropertyName AssemblyVersion -NotePropertyValue $env:PLUGIN_VERSION -Force
+          $manifest | Add-Member -NotePropertyName TestingAssemblyVersion -NotePropertyValue $env:PLUGIN_VERSION -Force
+          $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
+          $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
+          $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fix: Vulcan retainer restock now dismisses the retainer greeting automatically.' -Force
+          $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
+
+          ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
+          $env:PLUGIN_VERSION | Set-Content .\dist\VERSION -Encoding ascii
+
+          Write-Host 'Generated repo.json:'
+          Get-Content .\dist\repo.json
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: GatherBuddyReborn-${{ env.PLUGIN_VERSION }}
+          path: dist/
+
+      - name: Publish dist branch
+        if: github.event_name != 'pull_request'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: dist
+          publish_dir: ./dist
+          force_orphan: true
+          enable_jekyll: true
