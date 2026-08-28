@@ -30,6 +30,7 @@ jobs:
           ./scripts/Apply-ForkStatusPatches.ps1
           ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
           ./scripts/Apply-ForkSupplyPlanPatches.ps1
+          ./scripts/Apply-ForkSupplyPreferencePatches.ps1
 
       - name: Verify retainer greeting fix
         shell: pwsh
@@ -47,6 +48,7 @@ jobs:
           $status = Get-Content ./GatherBuddy/Gui/CraftingStatusWindow.cs -Raw
           $support = Get-Content ./GatherBuddy/Crafting/ForkVulcanWorkflowSupport.cs -Raw
           $supply = Get-Content ./GatherBuddy/Crafting/ForkVulcanSupplyPlan.cs -Raw
+          $config = Get-Content ./GatherBuddy/Config/Configuration.cs -Raw
 
           if ($bridge -notmatch 'Gather completion reached for queue mode; validating material plan') {
             throw 'Material preflight guard is missing after patch step.'
@@ -69,6 +71,9 @@ jobs:
           if ($bridge -notmatch 'grouped vendor shopping') {
             throw 'Grouped vendor acquisition stage is missing after patch step.'
           }
+          if ($bridge -notmatch 'ForkVulcanSupplyPlan.ShouldUseVendor') {
+            throw 'Gather-vs-vendor preference is not wired into material planning.'
+          }
           if ($queue -notmatch 'returning to material acquisition') {
             throw 'Missing-material craft recovery is missing after patch step.'
           }
@@ -84,6 +89,12 @@ jobs:
           if ($status -notmatch 'Vendor shopping stops') {
             throw 'Grouped vendor shopping UI is missing after patch step.'
           }
+          if ($status -notmatch 'Supply preference' -or $status -notmatch 'Gather first \(free\)' -or $status -notmatch 'Vendors first \(faster\)') {
+            throw 'Gather-vs-vendor choice UI is missing after patch step.'
+          }
+          if ($status -notmatch 'Vendor alternative:' -or $status -notmatch 'Free alternative: gatherable') {
+            throw 'Dual-source acquisition alternatives are not visible in Crafting Status.'
+          }
           if ($status -notmatch 'Retainers: .* available \(restock OFF\)') {
             throw 'Cross-source retainer availability hint is missing after patch step.'
           }
@@ -96,14 +107,20 @@ jobs:
           if ($support -notmatch 'MaxUnchangedGatherRecoveries' -or $support -notmatch 'infinite retry/honk loop') {
             throw 'Infinite gather/honk loop protection is missing.'
           }
-          if ($support -notmatch 'ForkVulcanSupplyPlan.IsGilVendorPreferred') {
-            throw 'Vendor-first acquisition classification is missing.'
+          if ($support -notmatch 'ForkVulcanSupplyPlan.ShouldUseVendor') {
+            throw 'Choice-aware acquisition classification is missing.'
           }
           if ($support -notmatch 'RetainerAvailable') {
             throw 'Retainer availability is not carried through gather targets.'
           }
           if ($supply -notmatch 'BuildVendorStops' -or $supply -notmatch 'largest number of still-missing item types') {
             throw 'Global grouped vendor supply planner is missing.'
+          }
+          if ($supply -notmatch 'VulcanSupplyPreference' -or $supply -notmatch 'HasDualSource' -or $supply -notmatch 'ShouldUseVendor') {
+            throw 'Configurable gather-vs-vendor supply policy is missing.'
+          }
+          if ($config -notmatch 'VulcanSupplyPreference.*GatherFirst') {
+            throw 'Persistent GatherFirst default is missing from configuration.'
           }
 
       - name: Set plugin version
@@ -165,7 +182,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: Vulcan now plans cheap gil-vendor materials globally, groups purchases by NPC/location, shows seller coordinates and prices, prefers buying those materials over unnecessary gathering, and keeps retainer availability visible for vendor/gather/drop sources whenever Restock from Retainers is disabled. Includes real-node AutoGather filtering, bounded gather recovery, useful-retainer preflight, live blockers, Recent activity, and retainer greeting auto-dismiss.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: dual-source crafting materials now offer a persistent Gather first (free, default) / Vendors first (faster) choice instead of forcing purchases. Crafting Status always shows the alternative vendor or gathering route and keeps retainer availability visible when restock is OFF. Vendor purchases remain globally grouped by NPC/location. Includes real-node AutoGather filtering, bounded gather recovery, useful-retainer preflight, live blockers, Recent activity, and retainer greeting auto-dismiss.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
