@@ -114,7 +114,7 @@ if ($status -notmatch 'DrawSupplyPreference\(') {
                     ImGui.PushTextWrapPos();
                     ImGui.TextColored(
                         new System.Numerics.Vector4(0.95f, 0.82f, 0.45f, 1.0f),
-                        $"    {vendorAlternative}");
+                        $"    Vendor alternative: {vendorAlternative}");
                     ImGui.PopTextWrapPos();
                 }
             }
