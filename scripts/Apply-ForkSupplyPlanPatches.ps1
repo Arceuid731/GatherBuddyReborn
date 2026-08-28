@@ -18,12 +18,40 @@ function Replace-Required {
 # Runs after the existing fork patches. This adds a global acquisition policy for
 # cheap gil-vendor materials: prefer one grouped shopping pass over gathering an
 # item that can simply be bought, and expose seller/location/price in Crafting Status.
+# When retainer restock is OFF we still surface retainer availability for every
+# acquisition source, so the user can choose to withdraw an item instead.
 
-# --- Workflow support: vendor-first classification + rich vendor hints ------------
+# --- Workflow support: vendor-first classification + rich vendor/retainer hints ----
 $supportPath = Join-Path $PSScriptRoot '..\GatherBuddy\Crafting\ForkVulcanWorkflowSupport.cs'
 $support = Get-Content -LiteralPath $supportPath -Raw
 
 if ($support -notmatch 'ForkVulcanSupplyPlan.IsGilVendorPreferred') {
+    $support = Replace-Required $support @'
+public sealed record VulcanGatherTarget(
+    uint ItemId,
+    string ItemName,
+    int TargetQuantity);
+
+public sealed record VulcanGatherTargetStatus(
+    uint ItemId,
+    string ItemName,
+    int CurrentQuantity,
+    int TargetQuantity)
+'@ @'
+public sealed record VulcanGatherTarget(
+    uint ItemId,
+    string ItemName,
+    int TargetQuantity,
+    int RetainerAvailable);
+
+public sealed record VulcanGatherTargetStatus(
+    uint ItemId,
+    string ItemName,
+    int CurrentQuantity,
+    int TargetQuantity,
+    int RetainerAvailable)
+'@ 'add retainer availability to gather target status'
+
     $support = Replace-Required $support @'
     public static MaterialSource ClassifyForAcquisition(uint itemId)
     {
@@ -41,13 +69,119 @@ if ($support -notmatch 'ForkVulcanSupplyPlan.IsGilVendorPreferred') {
 '@ 'prefer gil vendor before AutoGather classification'
 
     $support = Replace-Required $support @'
+    public static void UpdateGatherTargets(IEnumerable<(uint ItemId, int TargetQuantity)> targets)
+    {
+        var itemSheet = Dalamud.GameData.GetExcelSheet<Item>();
+        var planned = targets
+            .Where(target => target.ItemId > 0 && target.TargetQuantity > 0)
+            .GroupBy(target => target.ItemId)
+            .Select(group =>
+            {
+                var targetQuantity = group.Max(entry => entry.TargetQuantity);
+                var itemName = itemSheet != null && itemSheet.TryGetRow(group.Key, out var item)
+                    ? item.Name.ExtractText()
+                    : $"Item {group.Key}";
+                return new VulcanGatherTarget(group.Key, itemName, targetQuantity);
+            })
+            .OrderBy(target => target.ItemName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        lock (Sync)
+            _gatherTargets = planned;
+    }
+'@ @'
+    public static void UpdateGatherTargets(IEnumerable<(uint ItemId, int TargetQuantity)> targets)
+    {
+        var itemSheet = Dalamud.GameData.GetExcelSheet<Item>();
+        var grouped = targets
+            .Where(target => target.ItemId > 0 && target.TargetQuantity > 0)
+            .GroupBy(target => target.ItemId)
+            .Select(group => (ItemId: group.Key, TargetQuantity: group.Max(entry => entry.TargetQuantity)))
+            .ToList();
+
+        RetainerItemSnapshot retainerSnapshot = RetainerItemSnapshot.Empty;
+        var showRetainerHints = CraftingGatherBridge.GetActiveExecutionPlan()?.RetainerRestock != true
+                             && RetainerItemQuery.IsReady;
+        if (showRetainerHints && grouped.Count > 0)
+        {
+            try
+            {
+                retainerSnapshot = RetainerItemQuery.CreateSnapshot(grouped.Select(target => target.ItemId));
+            }
+            catch (Exception ex)
+            {
+                GatherBuddy.Log.Debug($"[ForkVulcanWorkflowSupport] Could not read retainer counts for gather targets: {ex.Message}");
+            }
+        }
+
+        var planned = grouped
+            .Select(target =>
+            {
+                var itemName = itemSheet != null && itemSheet.TryGetRow(target.ItemId, out var item)
+                    ? item.Name.ExtractText()
+                    : $"Item {target.ItemId}";
+                return new VulcanGatherTarget(
+                    target.ItemId,
+                    itemName,
+                    target.TargetQuantity,
+                    showRetainerHints ? retainerSnapshot.GetTotalCount(target.ItemId) : 0);
+            })
+            .OrderBy(target => target.ItemName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        lock (Sync)
+            _gatherTargets = planned;
+    }
+'@ 'snapshot retainer availability for gather targets when restock is off'
+
+    $support = Replace-Required $support @'
+            .Select(target => new VulcanGatherTargetStatus(
+                target.ItemId,
+                target.ItemName,
+                GetInventoryCount(target.ItemId),
+                target.TargetQuantity))
+'@ @'
+            .Select(target => new VulcanGatherTargetStatus(
+                target.ItemId,
+                target.ItemName,
+                GetInventoryCount(target.ItemId),
+                target.TargetQuantity,
+                target.RetainerAvailable))
+'@ 'carry retainer availability into live gather status'
+
+    $support = Replace-Required $support @'
+            .Where(entry => entry.Value > GetInventoryCount(entry.Key) && IsActuallyAutoGatherable(entry.Key))
+'@ @'
+            .Where(entry =>
+                entry.Value > GetInventoryCount(entry.Key)
+             && ClassifyForAcquisition(entry.Key) is MaterialSource.Gatherable or MaterialSource.Fish)
+'@ 'exclude vendor-preferred items from gather recovery'
+
+    $support = Replace-Required $support @'
+            if (IsActuallyAutoGatherable(itemId))
+                return true;
+'@ @'
+            if (ClassifyForAcquisition(itemId) is MaterialSource.Gatherable or MaterialSource.Fish)
+                return true;
+'@ 'exclude vendor-preferred items from outstanding gatherable check'
+
+    $support = Replace-Required $support @'
+            if (IsActuallyAutoGatherable(itemId))
+                count++;
+'@ @'
+            if (ClassifyForAcquisition(itemId) is MaterialSource.Gatherable or MaterialSource.Fish)
+                count++;
+'@ 'exclude vendor-preferred items from gatherable count'
+
+    $support = Replace-Required $support @'
         if (blocker.RetainerAvailable > 0)
             lines.Add($"Retainers: {blocker.RetainerAvailable} available (enable Restock from Retainers or withdraw manually)." );
 
         // The mob cache initializes asynchronously. A location-less GatheringItem
 '@ @'
-        if (blocker.RetainerAvailable > 0)
-            lines.Add($"Retainers: {blocker.RetainerAvailable} available (enable Restock from Retainers or withdraw manually)." );
+        var restockDisabled = CraftingGatherBridge.GetActiveExecutionPlan()?.RetainerRestock != true;
+        if (restockDisabled && blocker.RetainerAvailable > 0)
+            lines.Add($"Retainers: {blocker.RetainerAvailable} available (Restock from Retainers is OFF)." );
 
         if (blocker.Source == MaterialSource.GilVendor || ForkVulcanSupplyPlan.IsGilVendorPreferred(blocker.ItemId))
         {
@@ -56,10 +190,10 @@ if ($support -notmatch 'ForkVulcanSupplyPlan.IsGilVendorPreferred') {
         }
 
         // The mob cache initializes asynchronously. A location-less GatheringItem
-'@ 'add vendor seller/location/price hints'
+'@ 'add vendor hints and only show retainers when restock is off'
 
     Set-Content -LiteralPath $supportPath -Value $support -Encoding utf8 -NoNewline
-    Write-Host 'Applied supply-plan patch: vendor-first classification and seller hints.'
+    Write-Host 'Applied supply-plan patch: vendor-first classification and cross-source retainer hints.'
 }
 else {
     Write-Host 'Supply-plan support patch already present.'
@@ -119,7 +253,7 @@ else {
     Write-Host 'Supply-plan bridge patch already present.'
 }
 
-# --- Crafting Status: grouped shopping stops --------------------------------------
+# --- Crafting Status: grouped shopping stops + retainer alternatives ---------------
 $statusPath = Join-Path $PSScriptRoot '..\GatherBuddy\Gui\CraftingStatusWindow.cs'
 $status = Get-Content -LiteralPath $statusPath -Raw
 
@@ -132,6 +266,15 @@ if ($status -notmatch 'DrawVendorSupplyStops\(') {
         DrawVendorSupplyStops(currentState);
         DrawManualMaterialBlockers(currentState);
 '@ 'render grouped vendor stops'
+
+    $status = Replace-Required $status @'
+            ImGui.TextColored(color, $"- {target.ItemName}: {target.CurrentQuantity}/{target.TargetQuantity} ({suffix})");
+'@ @'
+            var retainerSuffix = target.RetainerAvailable > 0
+                ? $" — Retainers: {target.RetainerAvailable} available (restock OFF)"
+                : string.Empty;
+            ImGui.TextColored(color, $"- {target.ItemName}: {target.CurrentQuantity}/{target.TargetQuantity} ({suffix}){retainerSuffix}");
+'@ 'show retainer alternative beside gathering targets'
 
     $status = Replace-Required $status @'
     private static void DrawManualMaterialBlockers(CraftingQueueProcessor.QueueState currentState)
@@ -179,6 +322,12 @@ if ($status -notmatch 'DrawVendorSupplyStops\(') {
                 ImGui.TextColored(
                     new System.Numerics.Vector4(0.82f, 0.86f, 0.92f, 1.0f),
                     $"    - {purchase.ItemName}: buy {purchase.Missing} ({price})");
+                if (purchase.RetainerAvailable > 0 && CraftingGatherBridge.GetActiveExecutionPlan()?.RetainerRestock != true)
+                {
+                    ImGui.TextColored(
+                        new System.Numerics.Vector4(0.72f, 0.62f, 1.00f, 1.0f),
+                        $"        Retainers: {purchase.RetainerAvailable} available (restock OFF)");
+                }
             }
         }
 
@@ -190,8 +339,24 @@ if ($status -notmatch 'DrawVendorSupplyStops\(') {
     {
 '@ 'add grouped vendor shopping UI'
 
+    # Vendor blockers have their own grouped section above. Keep the generic manual
+    # section for monster drops / special currencies / unknowns so the same vendor
+    # information is not duplicated item-by-item.
+    $status = Replace-Required $status @'
+        var outstanding = blockers.Where(blocker => !blocker.Complete).ToList();
+        ImGui.Spacing();
+'@ @'
+        var outstanding = blockers
+            .Where(blocker => !blocker.Complete && !ForkVulcanSupplyPlan.IsGilVendorPreferred(blocker.ItemId))
+            .ToList();
+        if (outstanding.Count == 0)
+            return;
+
+        ImGui.Spacing();
+'@ 'avoid duplicate vendor blockers in generic manual section'
+
     Set-Content -LiteralPath $statusPath -Value $status -Encoding utf8 -NoNewline
-    Write-Host 'Applied supply-plan patch: grouped vendor shopping status UI.'
+    Write-Host 'Applied supply-plan patch: grouped vendor shopping status UI and retainer alternatives.'
 }
 else {
     Write-Host 'Grouped vendor shopping status UI already present.'
