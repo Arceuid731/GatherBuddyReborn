@@ -25,7 +25,9 @@ jobs:
 
       - name: Apply fork patches
         shell: pwsh
-        run: ./scripts/Apply-ForkPatches.ps1
+        run: |
+          ./scripts/Apply-ForkPatches.ps1
+          ./scripts/Apply-ForkStatusPatches.ps1
 
       - name: Verify retainer greeting fix
         shell: pwsh
@@ -48,14 +50,26 @@ jobs:
           if ($bridge -notmatch 'AutoGather could not start the generated crafting-material list') {
             throw 'AutoGather startup guard is missing after patch step.'
           }
-          if ($bridge -notmatch 'public static void ResumeQueue\(\)') {
-            throw 'Material-aware ResumeQueue entry point is missing after patch step.'
+          if ($bridge -notmatch 'BuildGatherPlanSummary') {
+            throw 'Detailed gather-plan diagnostics are missing after patch step.'
+          }
+          if ($bridge -notmatch 'WaitingForManualMaterials') {
+            throw 'Manual-material Resume support is missing after patch step.'
           }
           if ($queue -notmatch 'returning to material acquisition') {
             throw 'Missing-material craft recovery is missing after patch step.'
           }
-          if ($status -notmatch 'Manual materials required' -or $status -notmatch 'Recent activity') {
-            throw 'Crafting Status diagnostics are missing after patch step.'
+          if ($queue -notmatch 'HasUsefulRetainerWork') {
+            throw 'Useful-retainer preflight is missing after patch step.'
+          }
+          if ($queue -notmatch 'PauseForManualMaterials') {
+            throw 'Dedicated manual-material queue state is missing after patch step.'
+          }
+          if ($status -notmatch 'Manual materials acquired' -or $status -notmatch 'Gathering materials') {
+            throw 'Live Crafting Status material diagnostics are missing after patch step.'
+          }
+          if ($status -notmatch 'Recent activity') {
+            throw 'Recent activity panel is missing after patch step.'
           }
 
       - name: Set plugin version
@@ -117,7 +131,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: retainer greetings auto-dismiss; Vulcan now completes gathering with or without retainer restock, pauses on manual/drop materials with source hints, and shows Recent activity plus explicit Resume controls.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: useful-retainer preflight skips pointless bell trips; manual-drop pauses use a dedicated state with live inventory counts; gathering shows each target and remaining quantity; retainer greetings auto-dismiss; robust material acquisition and Recent activity remain enabled.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
