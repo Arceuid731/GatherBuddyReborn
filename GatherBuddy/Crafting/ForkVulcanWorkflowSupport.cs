@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using GatherBuddy.AutoGather.Lists;
 using GatherBuddy.Plugin;
 using Lumina.Excel.Sheets;
 
@@ -56,12 +57,17 @@ public sealed record VulcanGatherTargetStatus(
 public static class ForkVulcanWorkflowSupport
 {
     private const int MaxActivityEntries = 40;
+    private const int MaxUnchangedGatherRecoveries = 1;
+    private const int MaxTotalGatherRecoveries = 3;
     private static readonly object Sync = new();
     private static readonly List<VulcanActivityEntry> Activity = [];
     private static List<VulcanMaterialBlocker> _manualBlockers = [];
     private static List<VulcanGatherTarget> _gatherTargets = [];
     private static string _lastActivityMessage = string.Empty;
     private static DateTime _lastActivityAt = DateTime.MinValue;
+    private static string _lastGatherRecoverySignature = string.Empty;
+    private static int _unchangedGatherRecoveries;
+    private static int _totalGatherRecoveries;
 
     public static IReadOnlyList<VulcanActivityEntry> RecentActivity
     {
@@ -99,6 +105,9 @@ public static class ForkVulcanWorkflowSupport
             _gatherTargets = [];
             _lastActivityMessage = string.Empty;
             _lastActivityAt = DateTime.MinValue;
+            _lastGatherRecoverySignature = string.Empty;
+            _unchangedGatherRecoveries = 0;
+            _totalGatherRecoveries = 0;
         }
         MobDropInfoCache.EnsureInitializeStarted();
     }
@@ -121,6 +130,66 @@ public static class ForkVulcanWorkflowSupport
             _lastActivityMessage = message;
             _lastActivityAt = now;
         }
+    }
+
+    /// <summary>
+    /// `GameData.Gatherables` is built from the game's GatheringItem sheet and can
+    /// contain placeholder/orphan rows that have no gathering node at all. Those
+    /// rows must never be fed to AutoGather: it has nowhere to go and completes or
+    /// errors immediately. A real automatic target must have a concrete node/spot.
+    /// </summary>
+    public static bool IsActuallyAutoGatherable(uint itemId)
+    {
+        if (GatherBuddy.GameData.Gatherables.TryGetValue(itemId, out var gatherable))
+            return gatherable.NodeList.Count > 0;
+
+        if (GatherBuddy.GameData.Fishes.TryGetValue(itemId, out var fish))
+            return fish.FishingSpots.Count > 0;
+
+        return false;
+    }
+
+    public static bool TryAddAutoGatherTarget(AutoGatherList list, uint itemId, int quantity)
+    {
+        if (quantity <= 0)
+            return false;
+
+        if (GatherBuddy.GameData.Gatherables.TryGetValue(itemId, out var gatherable)
+         && gatherable.NodeList.Count > 0)
+            return list.Add(gatherable, (uint)quantity);
+
+        if (GatherBuddy.GameData.Fishes.TryGetValue(itemId, out var fish)
+         && fish.FishingSpots.Count > 0)
+            return list.Add(fish, (uint)quantity);
+
+        return false;
+    }
+
+    /// <summary>
+    /// Classification used by the crafting acquisition pipeline. Do not trust a raw
+    /// GatheringItem/FishParameter row as proof that AutoGather can obtain it; require
+    /// a real location. Phantom gather rows then fall through to drop/vendor/manual.
+    /// </summary>
+    public static MaterialSource ClassifyForAcquisition(uint itemId)
+    {
+        if (GatherBuddy.GameData.Gatherables.TryGetValue(itemId, out var gatherable)
+         && gatherable.NodeList.Count > 0)
+            return MaterialSource.Gatherable;
+
+        if (GatherBuddy.GameData.Fishes.TryGetValue(itemId, out var fish)
+         && fish.FishingSpots.Count > 0)
+            return MaterialSource.Fish;
+
+        if (MobDropInfoCache.IsKnownDropItem(itemId))
+            return MaterialSource.Drop;
+
+        var source = MaterialSourceClassifier.Classify(itemId);
+        // These two values can come from location-less game-data rows. At this point
+        // we already proved no real node/spot exists, so treating them as automatic
+        // would recreate the honk/rebuild loop.
+        return source is MaterialSource.Gatherable or MaterialSource.Fish
+            ? MaterialSource.Other
+            : source;
     }
 
     public static void UpdateGatherTargets(IEnumerable<(uint ItemId, int TargetQuantity)> targets)
@@ -175,6 +244,57 @@ public static class ForkVulcanWorkflowSupport
     {
         lock (Sync)
             _gatherTargets = [];
+    }
+
+    /// <summary>
+    /// Allows a bounded recovery if AutoGather reports completion while real node
+    /// materials are still missing. An unchanged deficit may be retried once only;
+    /// even with changing counts, the whole queue is capped at three recovery passes.
+    /// This makes an AutoGather/plugin data failure impossible to spin/honk forever.
+    /// </summary>
+    public static bool TryRegisterGatherRecovery(
+        IReadOnlyDictionary<uint, int> materials,
+        out string outstandingSummary,
+        out string stopReason)
+    {
+        var outstanding = materials
+            .Where(entry => entry.Value > GetInventoryCount(entry.Key) && IsActuallyAutoGatherable(entry.Key))
+            .Select(entry => new
+            {
+                entry.Key,
+                Needed = entry.Value,
+                Have = GetInventoryCount(entry.Key),
+                Name = GetItemName(entry.Key),
+            })
+            .OrderBy(entry => entry.Key)
+            .ToList();
+
+        outstandingSummary = string.Join(", ", outstanding.Select(entry => $"{entry.Name} x{Math.Max(0, entry.Needed - entry.Have)}"));
+        var signature = string.Join("|", outstanding.Select(entry => $"{entry.Key}:{entry.Have}/{entry.Needed}"));
+
+        lock (Sync)
+        {
+            if (string.Equals(signature, _lastGatherRecoverySignature, StringComparison.Ordinal))
+                _unchangedGatherRecoveries++;
+            else
+            {
+                _lastGatherRecoverySignature = signature;
+                _unchangedGatherRecoveries = 1;
+            }
+            _totalGatherRecoveries++;
+
+            if (_unchangedGatherRecoveries <= MaxUnchangedGatherRecoveries
+             && _totalGatherRecoveries <= MaxTotalGatherRecoveries)
+            {
+                stopReason = string.Empty;
+                return true;
+            }
+        }
+
+        stopReason = string.IsNullOrWhiteSpace(outstandingSummary)
+            ? "AutoGather ended without satisfying the crafting gather plan. Vulcan paused to prevent an infinite retry loop. Check the gather list and press Resume after resolving the issue."
+            : $"AutoGather ended without making enough progress on {outstandingSummary}. Vulcan paused to prevent an infinite retry/honk loop. Resolve the remaining material(s), then press Resume.";
+        return false;
     }
 
     /// <summary>
@@ -239,7 +359,7 @@ public static class ForkVulcanWorkflowSupport
             if (available >= needed)
                 continue;
 
-            var source = MaterialSourceClassifier.Classify(itemId);
+            var source = ClassifyForAcquisition(itemId);
             if (source is MaterialSource.Gatherable or MaterialSource.Fish)
                 continue;
 
@@ -294,8 +414,7 @@ public static class ForkVulcanWorkflowSupport
             if (needed <= GetInventoryCount(itemId))
                 continue;
 
-            var source = MaterialSourceClassifier.Classify(itemId);
-            if (source is MaterialSource.Gatherable or MaterialSource.Fish)
+            if (IsActuallyAutoGatherable(itemId))
                 return true;
         }
         return false;
@@ -308,8 +427,7 @@ public static class ForkVulcanWorkflowSupport
         {
             if (needed <= GetInventoryCount(itemId))
                 continue;
-            var source = MaterialSourceClassifier.Classify(itemId);
-            if (source is MaterialSource.Gatherable or MaterialSource.Fish)
+            if (IsActuallyAutoGatherable(itemId))
                 count++;
         }
         return count;
@@ -355,13 +473,17 @@ public static class ForkVulcanWorkflowSupport
         if (blocker.RetainerAvailable > 0)
             lines.Add($"Retainers: {blocker.RetainerAvailable} available (enable Restock from Retainers or withdraw manually)." );
 
-        if (blocker.Source != MaterialSource.Drop)
+        // The mob cache initializes asynchronously. A location-less GatheringItem
+        // can initially be classified as Other and become a known monster drop a
+        // moment later, so resolve that dynamically for the UI.
+        var dropInfo = MobDropInfoCache.GetDropInfoForItem(blocker.ItemId);
+        var effectiveDrop = blocker.Source == MaterialSource.Drop || dropInfo.HasData;
+        if (!effectiveDrop)
         {
             lines.Add(GetSourceLabel(blocker.Source));
             return lines;
         }
 
-        var dropInfo = MobDropInfoCache.GetDropInfoForItem(blocker.ItemId);
         if (!dropInfo.HasData)
         {
             lines.Add(MobDropInfoCache.IsInitialized
