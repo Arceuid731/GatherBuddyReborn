@@ -6,6 +6,12 @@ using Lumina.Excel.Sheets;
 
 namespace GatherBuddy.Crafting;
 
+public enum VulcanSupplyPreference
+{
+    GatherFirst,
+    VendorFirst,
+}
+
 public sealed record VulcanVendorPurchaseHint(
     uint ItemId,
     string ItemName,
@@ -29,17 +35,43 @@ public sealed record VulcanVendorStopHint(
 }
 
 /// <summary>
-/// Fork-local supply planner for crafting materials that can be bought from gil vendors.
-/// It deliberately plans against the whole outstanding material set and greedily groups
-/// items by NPC, so one vendor visit buys every useful material that NPC can provide.
+/// Fork-local supply planner for crafting materials sold by gil vendors.
+/// Vendor availability is treated as an alternative source, not an unconditional
+/// override: users choose whether dual-source items should be gathered or bought.
+/// Vendor-only materials still use the vendor regardless of that preference.
 /// </summary>
 public static class ForkVulcanSupplyPlan
 {
     public static bool VendorDataLoading
         => !VendorShopResolver.IsInitialized && VendorShopResolver.IsInitializing;
 
-    public static bool IsGilVendorPreferred(uint itemId)
+    public static VulcanSupplyPreference Preference
+        => GatherBuddy.Config.VulcanSupplyPreference;
+
+    public static void SetPreference(VulcanSupplyPreference preference)
+    {
+        if (GatherBuddy.Config.VulcanSupplyPreference == preference)
+            return;
+
+        GatherBuddy.Config.VulcanSupplyPreference = preference;
+        GatherBuddy.Config.Save();
+        ForkVulcanWorkflowSupport.AddActivity(
+            preference == VulcanSupplyPreference.GatherFirst
+                ? "Supply preference changed: gather free materials first; vendor alternatives remain visible."
+                : "Supply preference changed: buy gil-vendor materials first; gathering alternatives remain visible.",
+            VulcanActivityKind.Info);
+    }
+
+    public static bool IsGilVendorAvailable(uint itemId)
         => MaterialSourceClassifier.Classify(itemId, preferVendors: true) == MaterialSource.GilVendor;
+
+    public static bool HasDualSource(uint itemId)
+        => IsGilVendorAvailable(itemId) && ForkVulcanWorkflowSupport.IsActuallyAutoGatherable(itemId);
+
+    public static bool ShouldUseVendor(uint itemId)
+        => IsGilVendorAvailable(itemId)
+        && (Preference == VulcanSupplyPreference.VendorFirst
+         || !ForkVulcanWorkflowSupport.IsActuallyAutoGatherable(itemId));
 
     public static bool HasResolvedGilVendor(uint itemId)
     {
@@ -55,7 +87,7 @@ public static class ForkVulcanSupplyPlan
             return Array.Empty<VulcanVendorStopHint>();
 
         var pending = blockers
-            .Where(blocker => !blocker.Complete && IsGilVendorPreferred(blocker.ItemId))
+            .Where(blocker => !blocker.Complete && ShouldUseVendor(blocker.ItemId))
             .GroupBy(blocker => blocker.ItemId)
             .Select(group => group.First())
             .ToDictionary(blocker => blocker.ItemId);
@@ -69,9 +101,7 @@ public static class ForkVulcanSupplyPlan
         if (entriesByItem.Count == 0)
             return Array.Empty<VulcanVendorStopHint>();
 
-        // Build NPC coverage first, then greedily pick the NPC that satisfies the
-        // largest number of still-missing item types. This is a tiny set-cover problem;
-        // greedy is deterministic, fast, and exactly what we want for crafting lists.
+        // Greedy set-cover: on every stop pick the NPC covering the largest number of still-missing item types.
         var coverage = new Dictionary<uint, (VendorNpc Npc, HashSet<uint> ItemIds)>();
         foreach (var (itemId, entries) in entriesByItem)
         {
@@ -166,28 +196,56 @@ public static class ForkVulcanSupplyPlan
 
     public static IReadOnlyList<string> GetVendorHintLines(VulcanMaterialBlocker blocker)
     {
-        if (!IsGilVendorPreferred(blocker.ItemId))
+        if (!IsGilVendorAvailable(blocker.ItemId))
             return Array.Empty<string>();
 
-        var stops = BuildVendorStops(new[] { blocker });
-        if (stops.Count == 0)
-        {
-            EnsureVendorData();
-            return VendorShopResolver.IsInitialized
-                ? new[] { "Gil vendor — vendor known, but no usable NPC/location was resolved." }
-                : new[] { "Gil vendor — vendor/location data is still loading." };
-        }
-
-        var stop = stops[0];
-        var purchase = stop.Purchases[0];
-        var location = stop.MapX.HasValue && stop.MapY.HasValue
-            ? $"{stop.ZoneName} (X {stop.MapX.Value:F1}, Y {stop.MapY.Value:F1})"
-            : stop.ZoneName;
-        var cost = purchase.Missing > 1
-            ? $"{purchase.UnitCost:N0} {purchase.CurrencyName}/ea, {purchase.TotalCost:N0} total"
-            : $"{purchase.UnitCost:N0} {purchase.CurrencyName}";
-        return new[] { $"Buy from {stop.NpcName} — {location} — {cost}." };
+        var hint = GetVendorAlternativeHint(blocker.ItemId, blocker.Missing);
+        return string.IsNullOrWhiteSpace(hint) ? Array.Empty<string>() : new[] { $"Vendor: {hint}" };
     }
+
+    public static string GetVendorAlternativeHint(uint itemId, int missing)
+    {
+        if (!IsGilVendorAvailable(itemId) || missing <= 0)
+            return string.Empty;
+
+        EnsureVendorData();
+        if (!VendorShopResolver.IsInitialized)
+            return "seller/location data is still loading.";
+
+        var candidates = VendorShopResolver.GilShopEntries
+            .Where(entry => entry.ItemId == itemId && entry.Npcs.Count > 0)
+            .OrderBy(entry => entry.Cost)
+            .ToList();
+        if (candidates.Count == 0)
+            return "vendor known, but no usable seller was resolved.";
+
+        var best = candidates
+            .SelectMany(entry => entry.Npcs.Select(npc => new
+            {
+                Entry = entry,
+                Npc = npc,
+                Location = VendorNpcLocationCache.TryGetFirstLocation(npc.NpcId),
+            }))
+            .OrderByDescending(candidate => candidate.Location != null)
+            .ThenBy(candidate => candidate.Entry.Cost)
+            .ThenBy(candidate => candidate.Npc.Name, StringComparer.OrdinalIgnoreCase)
+            .First();
+
+        var location = best.Location != null
+            ? FormatLocation(best.Location)
+            : "unknown location";
+        var currency = string.IsNullOrWhiteSpace(best.Entry.CurrencyName) ? "gil" : best.Entry.CurrencyName;
+        var total = (long)missing * best.Entry.Cost;
+        var price = missing > 1
+            ? $"{best.Entry.Cost:N0} {currency}/ea, {total:N0} total"
+            : $"{best.Entry.Cost:N0} {currency}";
+        return $"{best.Npc.Name} — {location} — {price}.";
+    }
+
+    public static string GetGatherAlternativeHint(uint itemId)
+        => HasDualSource(itemId)
+            ? "Gathering alternative available: this item has a real BTN/MIN/FSH source, so Gather first can obtain it without spending gil."
+            : string.Empty;
 
     private static void EnsureVendorData()
     {
@@ -205,6 +263,14 @@ public static class ForkVulcanSupplyPlan
         return territory.PlaceName.RowId != 0
             ? territory.PlaceName.Value.Name.ToString()
             : $"Territory {location.TerritoryId}";
+    }
+
+    private static string FormatLocation(VendorNpcLocation location)
+    {
+        var zone = GetZoneName(location);
+        return TryGetMapCoordinates(location, out var coords)
+            ? $"{zone} (X {coords.X:F1}, Y {coords.Y:F1})"
+            : zone;
     }
 
     private static bool TryGetMapCoordinates(VendorNpcLocation location, out (float X, float Y) coords)
