@@ -31,6 +31,22 @@ public sealed record VulcanMaterialBlocker(
     MaterialSource Source)
 {
     public int Missing => Math.Max(0, Needed - Available);
+    public bool Complete => Missing == 0;
+}
+
+public sealed record VulcanGatherTarget(
+    uint ItemId,
+    string ItemName,
+    int TargetQuantity);
+
+public sealed record VulcanGatherTargetStatus(
+    uint ItemId,
+    string ItemName,
+    int CurrentQuantity,
+    int TargetQuantity)
+{
+    public int Remaining => Math.Max(0, TargetQuantity - CurrentQuantity);
+    public bool Complete => CurrentQuantity >= TargetQuantity;
 }
 
 /// <summary>
@@ -43,6 +59,7 @@ public static class ForkVulcanWorkflowSupport
     private static readonly object Sync = new();
     private static readonly List<VulcanActivityEntry> Activity = [];
     private static List<VulcanMaterialBlocker> _manualBlockers = [];
+    private static List<VulcanGatherTarget> _gatherTargets = [];
     private static string _lastActivityMessage = string.Empty;
     private static DateTime _lastActivityAt = DateTime.MinValue;
 
@@ -64,12 +81,22 @@ public static class ForkVulcanWorkflowSupport
         }
     }
 
+    /// <summary>
+    /// Same blocker set as when the queue paused, but bag counts are re-read on
+    /// every UI frame so manually looted/withdrawn items are reflected immediately.
+    /// </summary>
+    public static IReadOnlyList<VulcanMaterialBlocker> GetLiveManualBlockers()
+        => ManualBlockers
+            .Select(blocker => blocker with { Available = GetInventoryCount(blocker.ItemId) })
+            .ToList();
+
     public static void Reset()
     {
         lock (Sync)
         {
             Activity.Clear();
             _manualBlockers = [];
+            _gatherTargets = [];
             _lastActivityMessage = string.Empty;
             _lastActivityAt = DateTime.MinValue;
         }
@@ -84,8 +111,6 @@ public static class ForkVulcanWorkflowSupport
         var now = DateTime.Now;
         lock (Sync)
         {
-            // State callbacks can fire several times in a very short window. Keep the
-            // feed useful instead of filling it with identical lines.
             if (string.Equals(message, _lastActivityMessage, StringComparison.Ordinal)
              && (now - _lastActivityAt) < TimeSpan.FromMilliseconds(750))
                 return;
@@ -96,6 +121,105 @@ public static class ForkVulcanWorkflowSupport
             _lastActivityMessage = message;
             _lastActivityAt = now;
         }
+    }
+
+    public static void UpdateGatherTargets(IEnumerable<(uint ItemId, int TargetQuantity)> targets)
+    {
+        var itemSheet = Dalamud.GameData.GetExcelSheet<Item>();
+        var planned = targets
+            .Where(target => target.ItemId > 0 && target.TargetQuantity > 0)
+            .GroupBy(target => target.ItemId)
+            .Select(group =>
+            {
+                var targetQuantity = group.Max(entry => entry.TargetQuantity);
+                var itemName = itemSheet != null && itemSheet.TryGetRow(group.Key, out var item)
+                    ? item.Name.ExtractText()
+                    : $"Item {group.Key}";
+                return new VulcanGatherTarget(group.Key, itemName, targetQuantity);
+            })
+            .OrderBy(target => target.ItemName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        lock (Sync)
+            _gatherTargets = planned;
+    }
+
+    public static IReadOnlyList<VulcanGatherTargetStatus> GetGatherTargetStatus()
+    {
+        VulcanGatherTarget[] targets;
+        lock (Sync)
+            targets = _gatherTargets.ToArray();
+
+        return targets
+            .Select(target => new VulcanGatherTargetStatus(
+                target.ItemId,
+                target.ItemName,
+                GetInventoryCount(target.ItemId),
+                target.TargetQuantity))
+            .ToList();
+    }
+
+    public static string BuildGatherPlanSummary(int maxItems = 5)
+    {
+        var pending = GetGatherTargetStatus().Where(target => !target.Complete).ToList();
+        if (pending.Count == 0)
+            return string.Empty;
+
+        var summary = string.Join(", ", pending.Take(maxItems).Select(target => $"{target.ItemName} x{target.Remaining}"));
+        if (pending.Count > maxItems)
+            summary += $", +{pending.Count - maxItems} more";
+        return summary;
+    }
+
+    public static void ClearGatherTargets()
+    {
+        lock (Sync)
+            _gatherTargets = [];
+    }
+
+    /// <summary>
+    /// Returns whether travelling to a retainer bell can actually satisfy at least
+    /// one current inventory deficit. If AllaganTools is not ready yet we preserve
+    /// upstream behaviour rather than incorrectly skipping a potentially useful restock.
+    /// </summary>
+    public static bool HasUsefulRetainerWork(
+        IReadOnlyDictionary<uint, int> materialTargets,
+        IReadOnlyDictionary<uint, int> precraftTargets)
+    {
+        if (!AllaganTools.Enabled)
+            return false;
+
+        var combined = new Dictionary<uint, int>(materialTargets);
+        foreach (var (itemId, needed) in precraftTargets)
+            combined[itemId] = combined.GetValueOrDefault(itemId) + needed;
+
+        if (combined.Count == 0)
+            return false;
+
+        if (!RetainerItemQuery.IsReady)
+            return true;
+
+        RetainerItemSnapshot snapshot;
+        try
+        {
+            snapshot = RetainerItemQuery.CreateSnapshot(combined.Keys);
+        }
+        catch (Exception ex)
+        {
+            GatherBuddy.Log.Debug($"[ForkVulcanWorkflowSupport] Retainer preflight failed, preserving restock attempt: {ex.Message}");
+            return true;
+        }
+
+        foreach (var (itemId, targetQuantity) in combined)
+        {
+            var missing = Math.Max(0, targetQuantity - GetInventoryCount(itemId));
+            if (missing <= 0)
+                continue;
+            if (snapshot.GetTotalCount(itemId) > 0)
+                return true;
+        }
+
+        return false;
     }
 
     public static IReadOnlyList<VulcanMaterialBlocker> UpdateManualBlockers(
@@ -201,12 +325,13 @@ public static class ForkVulcanWorkflowSupport
 
     public static string BuildPauseReason(IReadOnlyList<VulcanMaterialBlocker> blockers)
     {
-        if (blockers.Count == 0)
-            return string.Empty;
+        var outstanding = blockers.Where(blocker => !blocker.Complete).ToList();
+        if (outstanding.Count == 0)
+            return "Manual materials acquired. Press Resume to continue.";
 
-        var preview = string.Join(", ", blockers.Take(3).Select(blocker => $"{blocker.ItemName} x{blocker.Missing}"));
-        if (blockers.Count > 3)
-            preview += $", +{blockers.Count - 3} more";
+        var preview = string.Join(", ", outstanding.Take(3).Select(blocker => $"{blocker.ItemName} x{blocker.Missing}"));
+        if (outstanding.Count > 3)
+            preview += $", +{outstanding.Count - 3} more";
         return $"Manual materials required: {preview}. Acquire or withdraw them, then press Resume.";
     }
 
