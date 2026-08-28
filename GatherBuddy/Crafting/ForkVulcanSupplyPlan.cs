@@ -62,18 +62,12 @@ public static class ForkVulcanSupplyPlan
             VulcanActivityKind.Info);
     }
 
-    /// <summary>True when the item has a normal gil-vendor source in Vulcan data.</summary>
     public static bool IsGilVendorAvailable(uint itemId)
         => MaterialSourceClassifier.Classify(itemId, preferVendors: true) == MaterialSource.GilVendor;
 
-    /// <summary>True when the user actually has a gather-vs-buy choice for the item.</summary>
     public static bool HasDualSource(uint itemId)
         => IsGilVendorAvailable(itemId) && ForkVulcanWorkflowSupport.IsActuallyAutoGatherable(itemId);
 
-    /// <summary>
-    /// Vendor-only materials always use the vendor. Dual-source items respect the
-    /// user's persistent GatherFirst / VendorFirst preference.
-    /// </summary>
     public static bool ShouldUseVendor(uint itemId)
         => IsGilVendorAvailable(itemId)
         && (Preference == VulcanSupplyPreference.VendorFirst
@@ -107,9 +101,6 @@ public static class ForkVulcanSupplyPlan
         if (entriesByItem.Count == 0)
             return Array.Empty<VulcanVendorStopHint>();
 
-        // Build NPC coverage first, then greedily pick the NPC that satisfies the
-        // largest number of still-missing item types. This is a tiny set-cover problem;
-        // greedy is deterministic, fast, and exactly what we want for crafting lists.
         var coverage = new Dictionary<uint, (VendorNpc Npc, HashSet<uint> ItemIds)>();
         foreach (var (itemId, entries) in entriesByItem)
         {
@@ -208,13 +199,9 @@ public static class ForkVulcanSupplyPlan
             return Array.Empty<string>();
 
         var hint = GetVendorAlternativeHint(blocker.ItemId, blocker.Missing);
-        return string.IsNullOrWhiteSpace(hint) ? Array.Empty<string>() : new[] { hint };
+        return string.IsNullOrWhiteSpace(hint) ? Array.Empty<string>() : new[] { $"Vendor: {hint}" };
     }
 
-    /// <summary>
-    /// Vendor information for a dual-source gather target. This deliberately ignores
-    /// the current preference so the alternative remains visible whichever path wins.
-    /// </summary>
     public static string GetVendorAlternativeHint(uint itemId, int missing)
     {
         if (!IsGilVendorAvailable(itemId) || missing <= 0)
@@ -222,14 +209,14 @@ public static class ForkVulcanSupplyPlan
 
         EnsureVendorData();
         if (!VendorShopResolver.IsInitialized)
-            return "Vendor alternative: seller/location data is still loading.";
+            return "seller/location data is still loading.";
 
         var candidates = VendorShopResolver.GilShopEntries
             .Where(entry => entry.ItemId == itemId && entry.Npcs.Count > 0)
             .OrderBy(entry => entry.Cost)
             .ToList();
         if (candidates.Count == 0)
-            return "Vendor alternative: vendor known, but no usable seller was resolved.";
+            return "vendor known, but no usable seller was resolved.";
 
         var best = candidates
             .SelectMany(entry => entry.Npcs.Select(npc => new
@@ -251,7 +238,7 @@ public static class ForkVulcanSupplyPlan
         var price = missing > 1
             ? $"{best.Entry.Cost:N0} {currency}/ea, {total:N0} total"
             : $"{best.Entry.Cost:N0} {currency}";
-        return $"Vendor alternative: {best.Npc.Name} — {location} — {price}.";
+        return $"{best.Npc.Name} — {location} — {price}.";
     }
 
     public static string GetGatherAlternativeHint(uint itemId)
