@@ -17,6 +17,7 @@ jobs:
         run: |
           ./scripts/Apply-ForkPatches.ps1
           ./scripts/Apply-ForkStatusPatches.ps1
+          ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
 
       - name: Verify fork status patches
         shell: pwsh
@@ -24,14 +25,21 @@ jobs:
           $queue = Get-Content ./GatherBuddy/Crafting/CraftingQueueProcessor.cs -Raw
           $bridge = Get-Content ./GatherBuddy/Crafting/CraftingGatherBridge.cs -Raw
           $status = Get-Content ./GatherBuddy/Gui/CraftingStatusWindow.cs -Raw
+          $support = Get-Content ./GatherBuddy/Crafting/ForkVulcanWorkflowSupport.cs -Raw
           if ($queue -notmatch 'WaitingForManualMaterials' -or $queue -notmatch 'HasUsefulRetainerWork') {
             throw 'Queue status/retainer preflight patch missing.'
           }
           if ($bridge -notmatch 'BuildGatherPlanSummary' -or $bridge -notmatch 'WaitingForManualMaterials') {
             throw 'Gather plan/manual resume patch missing.'
           }
+          if ($bridge -notmatch 'TryAddAutoGatherTarget' -or $bridge -notmatch 'TryRegisterGatherRecovery') {
+            throw 'Real-node filtering or bounded gather recovery patch missing.'
+          }
           if ($status -notmatch 'Gathering materials' -or $status -notmatch 'Manual materials acquired') {
             throw 'Live Crafting Status patch missing.'
+          }
+          if ($support -notmatch 'NodeList.Count > 0' -or $support -notmatch 'MaxUnchangedGatherRecoveries') {
+            throw 'Gather location validation or loop guard support missing.'
           }
 
       - name: Set up .NET
