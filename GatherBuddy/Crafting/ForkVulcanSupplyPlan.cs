@@ -101,6 +101,7 @@ public static class ForkVulcanSupplyPlan
         if (entriesByItem.Count == 0)
             return Array.Empty<VulcanVendorStopHint>();
 
+        // Greedy set-cover: on every stop pick the NPC covering the largest number of still-missing item types.
         var coverage = new Dictionary<uint, (VendorNpc Npc, HashSet<uint> ItemIds)>();
         foreach (var (itemId, entries) in entriesByItem)
         {
