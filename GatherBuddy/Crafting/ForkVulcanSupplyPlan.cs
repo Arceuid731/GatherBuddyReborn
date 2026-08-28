@@ -10,6 +10,7 @@ public sealed record VulcanVendorPurchaseHint(
     uint ItemId,
     string ItemName,
     int Missing,
+    int RetainerAvailable,
     uint UnitCost,
     string CurrencyName)
 {
@@ -119,6 +120,7 @@ public static class ForkVulcanSupplyPlan
                     itemId,
                     blocker.ItemName,
                     blocker.Missing,
+                    blocker.RetainerAvailable,
                     entry.Cost,
                     string.IsNullOrWhiteSpace(entry.CurrencyName) ? "gil" : entry.CurrencyName));
                 remaining.Remove(itemId);
