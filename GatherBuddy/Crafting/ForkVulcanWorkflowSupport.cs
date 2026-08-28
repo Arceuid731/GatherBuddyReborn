@@ -191,7 +191,7 @@ public static class ForkVulcanWorkflowSupport
 
         var combined = new Dictionary<uint, int>(materialTargets);
         foreach (var (itemId, needed) in precraftTargets)
-            combined[itemId] = Math.Max(combined.GetValueOrDefault(itemId), needed);
+            combined[itemId] = combined.GetValueOrDefault(itemId) + needed;
 
         if (combined.Count == 0)
             return false;
