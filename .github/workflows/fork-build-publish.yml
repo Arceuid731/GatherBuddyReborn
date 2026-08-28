@@ -29,6 +29,7 @@ jobs:
           ./scripts/Apply-ForkPatches.ps1
           ./scripts/Apply-ForkStatusPatches.ps1
           ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
+          ./scripts/Apply-ForkSupplyPlanPatches.ps1
 
       - name: Verify retainer greeting fix
         shell: pwsh
@@ -45,6 +46,7 @@ jobs:
           $queue = Get-Content ./GatherBuddy/Crafting/CraftingQueueProcessor.cs -Raw
           $status = Get-Content ./GatherBuddy/Gui/CraftingStatusWindow.cs -Raw
           $support = Get-Content ./GatherBuddy/Crafting/ForkVulcanWorkflowSupport.cs -Raw
+          $supply = Get-Content ./GatherBuddy/Crafting/ForkVulcanSupplyPlan.cs -Raw
 
           if ($bridge -notmatch 'Gather completion reached for queue mode; validating material plan') {
             throw 'Material preflight guard is missing after patch step.'
@@ -64,6 +66,9 @@ jobs:
           if ($bridge -notmatch 'TryRegisterGatherRecovery') {
             throw 'Bounded gather-recovery guard is missing after patch step.'
           }
+          if ($bridge -notmatch 'grouped vendor shopping') {
+            throw 'Grouped vendor acquisition stage is missing after patch step.'
+          }
           if ($queue -notmatch 'returning to material acquisition') {
             throw 'Missing-material craft recovery is missing after patch step.'
           }
@@ -76,6 +81,12 @@ jobs:
           if ($status -notmatch 'Manual materials acquired' -or $status -notmatch 'Gathering materials') {
             throw 'Live Crafting Status material diagnostics are missing after patch step.'
           }
+          if ($status -notmatch 'Vendor shopping stops') {
+            throw 'Grouped vendor shopping UI is missing after patch step.'
+          }
+          if ($status -notmatch 'Retainers: .* available \(restock OFF\)') {
+            throw 'Cross-source retainer availability hint is missing after patch step.'
+          }
           if ($status -notmatch 'Recent activity') {
             throw 'Recent activity panel is missing after patch step.'
           }
@@ -84,6 +95,15 @@ jobs:
           }
           if ($support -notmatch 'MaxUnchangedGatherRecoveries' -or $support -notmatch 'infinite retry/honk loop') {
             throw 'Infinite gather/honk loop protection is missing.'
+          }
+          if ($support -notmatch 'ForkVulcanSupplyPlan.IsGilVendorPreferred') {
+            throw 'Vendor-first acquisition classification is missing.'
+          }
+          if ($support -notmatch 'RetainerAvailable') {
+            throw 'Retainer availability is not carried through gather targets.'
+          }
+          if ($supply -notmatch 'BuildVendorStops' -or $supply -notmatch 'largest number of still-missing item types') {
+            throw 'Global grouped vendor supply planner is missing.'
           }
 
       - name: Set plugin version
@@ -145,7 +165,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: crafting AutoGather now requires a real node/fishing spot, preventing monster drops or orphan GatheringItem rows from entering gather lists; gather recovery is bounded so AutoGather can never enter an infinite rebuild/honk loop. Includes useful-retainer preflight, live manual/drop blockers, gather targets, Recent activity, and retainer greeting auto-dismiss.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: Vulcan now plans cheap gil-vendor materials globally, groups purchases by NPC/location, shows seller coordinates and prices, prefers buying those materials over unnecessary gathering, and keeps retainer availability visible for vendor/gather/drop sources whenever Restock from Retainers is disabled. Includes real-node AutoGather filtering, bounded gather recovery, useful-retainer preflight, live blockers, Recent activity, and retainer greeting auto-dismiss.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
