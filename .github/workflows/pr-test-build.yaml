@@ -18,6 +18,8 @@ jobs:
           ./scripts/Apply-ForkPatches.ps1
           ./scripts/Apply-ForkStatusPatches.ps1
           ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
+          ./scripts/Apply-ForkSupplyPlanPatches.ps1
+          ./scripts/Apply-ForkSupplyPreferencePatches.ps1
 
       - name: Verify fork status patches
         shell: pwsh
@@ -26,6 +28,8 @@ jobs:
           $bridge = Get-Content ./GatherBuddy/Crafting/CraftingGatherBridge.cs -Raw
           $status = Get-Content ./GatherBuddy/Gui/CraftingStatusWindow.cs -Raw
           $support = Get-Content ./GatherBuddy/Crafting/ForkVulcanWorkflowSupport.cs -Raw
+          $supply = Get-Content ./GatherBuddy/Crafting/ForkVulcanSupplyPlan.cs -Raw
+          $config = Get-Content ./GatherBuddy/Config/Configuration.cs -Raw
           if ($queue -notmatch 'WaitingForManualMaterials' -or $queue -notmatch 'HasUsefulRetainerWork') {
             throw 'Queue status/retainer preflight patch missing.'
           }
@@ -35,11 +39,26 @@ jobs:
           if ($bridge -notmatch 'TryAddAutoGatherTarget' -or $bridge -notmatch 'TryRegisterGatherRecovery') {
             throw 'Real-node filtering or bounded gather recovery patch missing.'
           }
+          if ($bridge -notmatch 'ForkVulcanSupplyPlan.ShouldUseVendor') {
+            throw 'Supply preference is not wired into the crafting bridge.'
+          }
           if ($status -notmatch 'Gathering materials' -or $status -notmatch 'Manual materials acquired') {
             throw 'Live Crafting Status patch missing.'
           }
+          if ($status -notmatch 'Gather first \(free\)' -or $status -notmatch 'Vendors first \(faster\)') {
+            throw 'Supply preference selector missing.'
+          }
           if ($support -notmatch 'NodeList.Count > 0' -or $support -notmatch 'MaxUnchangedGatherRecoveries') {
             throw 'Gather location validation or loop guard support missing.'
+          }
+          if ($support -notmatch 'ForkVulcanSupplyPlan.ShouldUseVendor') {
+            throw 'Choice-aware source classification missing.'
+          }
+          if ($supply -notmatch 'VulcanSupplyPreference' -or $supply -notmatch 'HasDualSource') {
+            throw 'Dual-source supply policy missing.'
+          }
+          if ($config -notmatch 'VulcanSupplyPreference.*GatherFirst') {
+            throw 'Persistent GatherFirst default missing.'
           }
 
       - name: Set up .NET
