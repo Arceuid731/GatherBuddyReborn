@@ -14,7 +14,25 @@ jobs:
 
       - name: Apply fork patches
         shell: pwsh
-        run: ./scripts/Apply-ForkPatches.ps1
+        run: |
+          ./scripts/Apply-ForkPatches.ps1
+          ./scripts/Apply-ForkStatusPatches.ps1
+
+      - name: Verify fork status patches
+        shell: pwsh
+        run: |
+          $queue = Get-Content ./GatherBuddy/Crafting/CraftingQueueProcessor.cs -Raw
+          $bridge = Get-Content ./GatherBuddy/Crafting/CraftingGatherBridge.cs -Raw
+          $status = Get-Content ./GatherBuddy/Gui/CraftingStatusWindow.cs -Raw
+          if ($queue -notmatch 'WaitingForManualMaterials' -or $queue -notmatch 'HasUsefulRetainerWork') {
+            throw 'Queue status/retainer preflight patch missing.'
+          }
+          if ($bridge -notmatch 'BuildGatherPlanSummary' -or $bridge -notmatch 'WaitingForManualMaterials') {
+            throw 'Gather plan/manual resume patch missing.'
+          }
+          if ($status -notmatch 'Gathering materials' -or $status -notmatch 'Manual materials acquired') {
+            throw 'Live Crafting Status patch missing.'
+          }
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
