@@ -33,6 +33,7 @@ jobs:
           ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
           ./scripts/Apply-ForkSupplyPlanPatches.ps1
           ./scripts/Apply-ForkSupplyPreferencePatches.ps1
+          ./scripts/Apply-ForkManualSourceTravelPatches.ps1
 
       - name: Verify retainer fixes
         shell: pwsh
@@ -56,6 +57,9 @@ jobs:
           $status = Get-Content ./GatherBuddy/Gui/CraftingStatusWindow.cs -Raw
           $support = Get-Content ./GatherBuddy/Crafting/ForkVulcanWorkflowSupport.cs -Raw
           $supply = Get-Content ./GatherBuddy/Crafting/ForkVulcanSupplyPlan.cs -Raw
+          $manualTravel = Get-Content ./GatherBuddy/Crafting/ForkVulcanManualTravel.cs -Raw
+          $mobSources = Get-Content ./GatherBuddy/Crafting/ForkVulcanMobSources.cs -Raw
+          $plugin = Get-Content ./GatherBuddy/GatherBuddy.cs -Raw
           $config = Get-Content ./GatherBuddy/Config/Configuration.cs -Raw
 
           if ($bridge -notmatch 'Gather completion reached for queue mode; validating material plan') {
@@ -91,6 +95,9 @@ jobs:
           if ($bridge -notmatch 'ForkVulcanSupplyPlan.ShouldUseVendor') {
             throw 'Gather-vs-vendor preference is not wired into material planning.'
           }
+          if ($bridge -notmatch 'ForkVulcanManualTravel.Stop\(clearStatus: false\)') {
+            throw 'Resume does not own the manual-travel boundary.'
+          }
           if ($queue -notmatch 'returning to material acquisition') {
             throw 'Missing-material craft recovery is missing after patch step.'
           }
@@ -109,8 +116,8 @@ jobs:
           if ($status -notmatch 'Supply preference' -or $status -notmatch 'Gather first \(free\)' -or $status -notmatch 'Vendors first \(faster\)') {
             throw 'Gather-vs-vendor choice UI is missing after patch step.'
           }
-          if ($status -notmatch 'Vendor alternative:' -or $status -notmatch 'Free alternative: gatherable') {
-            throw 'Dual-source acquisition alternatives are not visible in Crafting Status.'
+          if ($status -notmatch 'Go##mob-' -or $status -notmatch 'Go##vendor-') {
+            throw 'Manual mob/vendor Go actions are missing from Crafting Status.'
           }
           if ($status -notmatch 'Retainers: .* available \(restock OFF\)') {
             throw 'Cross-source retainer availability hint is missing after patch step.'
@@ -124,8 +131,8 @@ jobs:
           if ($support -notmatch 'MaxUnchangedGatherRecoveries' -or $support -notmatch 'infinite retry/honk loop') {
             throw 'Infinite gather/honk loop protection is missing.'
           }
-          if ($support -notmatch 'ForkVulcanSupplyPlan.ShouldUseVendor') {
-            throw 'Choice-aware acquisition classification is missing.'
+          if ($support -notmatch 'ForkVulcanMobSources.GetEffectiveSource') {
+            throw 'Live source reclassification is missing.'
           }
           if ($support -notmatch 'RetainerAvailable') {
             throw 'Retainer availability is not carried through gather targets.'
@@ -135,6 +142,15 @@ jobs:
           }
           if ($supply -notmatch 'VulcanSupplyPreference' -or $supply -notmatch 'HasDualSource' -or $supply -notmatch 'ShouldUseVendor') {
             throw 'Configurable gather-vs-vendor supply policy is missing.'
+          }
+          if ($manualTravel -notmatch 'StartMobTravel' -or $manualTravel -notmatch 'StartVendorTravel') {
+            throw 'Manual supply travel helper is missing.'
+          }
+          if ($mobSources -notmatch 'GetLocations' -or $mobSources -notmatch 'GetEffectiveSource') {
+            throw 'Live mob source helper is missing.'
+          }
+          if ($plugin -notmatch 'ForkVulcanManualTravel.Update') {
+            throw 'Manual travel is not updated independently of the status window.'
           }
           if ($config -notmatch 'VulcanSupplyPreference.*GatherFirst') {
             throw 'Persistent GatherFirst default is missing from configuration.'
@@ -147,7 +163,7 @@ jobs:
           # component monotonic so Dalamud prefers the fork over that build.
           $version = "7.5.5.${{ github.run_number }}"
           "PLUGIN_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Building GatherBuddy Reborn fork $version"
+          Write-Host "Building GatherBuddy Reborn Enhanced $version"
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
@@ -199,7 +215,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fix: retainer restock now has one state-machine owner. CraftingGatherBridge no longer repeats the asynchronous retainer preflight after CraftingQueueProcessor starts, preventing bell navigation and Manual Materials from running concurrently. The unnecessary bell-interaction timing workaround was removed. Includes pooled-retainer live scan, grouped vendor/gather preferences, live blockers, bounded gather recovery, Recent activity, and retainer greeting auto-dismiss.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Enhanced supply UX: switching Vendor first/Gather first now reclassifies blocked materials live in both directions. Monster drop locations and grouped vendor stops expose Go actions that place a map flag and reuse Vulcan travel routing to bring the player to the source while the queue remains paused; farming/purchasing and Resume remain explicitly manual. Includes bulletproof retainer-stage ownership, pooled-retainer live scan, bounded gather recovery, Recent activity, and retainer greeting auto-dismiss.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
