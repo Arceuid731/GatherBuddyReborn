@@ -22,6 +22,7 @@ jobs:
           ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
           ./scripts/Apply-ForkSupplyPlanPatches.ps1
           ./scripts/Apply-ForkSupplyPreferencePatches.ps1
+          ./scripts/Apply-ForkManualSourceTravelPatches.ps1
 
       - name: Verify fork status patches
         shell: pwsh
@@ -32,6 +33,9 @@ jobs:
           $status = Get-Content ./GatherBuddy/Gui/CraftingStatusWindow.cs -Raw
           $support = Get-Content ./GatherBuddy/Crafting/ForkVulcanWorkflowSupport.cs -Raw
           $supply = Get-Content ./GatherBuddy/Crafting/ForkVulcanSupplyPlan.cs -Raw
+          $manualTravel = Get-Content ./GatherBuddy/Crafting/ForkVulcanManualTravel.cs -Raw
+          $mobSources = Get-Content ./GatherBuddy/Crafting/ForkVulcanMobSources.cs -Raw
+          $plugin = Get-Content ./GatherBuddy/GatherBuddy.cs -Raw
           $config = Get-Content ./GatherBuddy/Config/Configuration.cs -Raw
           if ($retainer -notmatch '_useLiveRetainerScan' -or $retainer -notmatch 'BuildLiveItemListForCurrentRetainer') {
             throw 'Pooled retainer live-scan fallback missing.'
@@ -60,20 +64,35 @@ jobs:
           if ($bridge -notmatch 'ForkVulcanSupplyPlan.ShouldUseVendor') {
             throw 'Supply preference is not wired into the crafting bridge.'
           }
+          if ($bridge -notmatch 'ForkVulcanManualTravel.Stop\(clearStatus: false\)') {
+            throw 'Resume does not own the manual-travel boundary.'
+          }
           if ($status -notmatch 'Gathering materials' -or $status -notmatch 'Manual materials acquired') {
             throw 'Live Crafting Status patch missing.'
           }
           if ($status -notmatch 'Gather first \(free\)' -or $status -notmatch 'Vendors first \(faster\)') {
             throw 'Supply preference selector missing.'
           }
+          if ($status -notmatch 'Go##mob-' -or $status -notmatch 'Go##vendor-') {
+            throw 'Manual material/vendor Go actions are missing.'
+          }
           if ($support -notmatch 'NodeList.Count > 0' -or $support -notmatch 'MaxUnchangedGatherRecoveries') {
             throw 'Gather location validation or loop guard support missing.'
           }
-          if ($support -notmatch 'ForkVulcanSupplyPlan.ShouldUseVendor') {
-            throw 'Choice-aware source classification missing.'
+          if ($support -notmatch 'ForkVulcanMobSources.GetEffectiveSource') {
+            throw 'Live source reclassification is missing.'
           }
           if ($supply -notmatch 'VulcanSupplyPreference' -or $supply -notmatch 'HasDualSource') {
             throw 'Dual-source supply policy missing.'
+          }
+          if ($manualTravel -notmatch 'StartMobTravel' -or $manualTravel -notmatch 'StartVendorTravel') {
+            throw 'Manual supply travel helper is missing.'
+          }
+          if ($mobSources -notmatch 'GetLocations' -or $mobSources -notmatch 'GetEffectiveSource') {
+            throw 'Live mob source helper is missing.'
+          }
+          if ($plugin -notmatch 'ForkVulcanManualTravel.Update') {
+            throw 'Manual travel is not updated independently of the status window.'
           }
           if ($config -notmatch 'VulcanSupplyPreference.*GatherFirst') {
             throw 'Persistent GatherFirst default missing.'
