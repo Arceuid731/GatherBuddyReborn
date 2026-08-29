@@ -35,6 +35,7 @@ jobs:
           ./scripts/Apply-ForkSupplyPreferencePatches.ps1
           ./scripts/Apply-ForkManualSourceTravelPatches.ps1
           ./scripts/Apply-ForkVulcanGatherIsolationPatches.ps1
+          ./scripts/Apply-ForkZoningCrashGuard.ps1
 
       - name: Verify retainer fixes
         shell: pwsh
@@ -164,6 +165,9 @@ jobs:
           if ($autoGather -notmatch 'VULCAN OWNS IDLE TRAVEL' -or $autoGather -notmatch 'vulcanCraftingGatherActive') {
             throw 'AutoGather GoHomeWhenIdle is not isolated from the Vulcan crafting gather stage.'
           }
+          if ($autoGather -notmatch 'VULCAN PASSIVE STATUS SNAPSHOT' -or $autoGather -match '_activeItemList\.GetNextOrDefault\(\);\s*return _activeItemList') {
+            throw 'Crafting Status can still refresh the AutoGather scheduler and crash during zoning.'
+          }
 
       - name: Set plugin version
         shell: pwsh
@@ -224,7 +228,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Vulcan gathering isolation fix: temporary crafting gather targets now use bag counts only, so AutoGather cannot skip a missing crafting material merely because copies exist on retainers when restock is off (or after the retainer stage is already complete). AutoGather GoHomeWhenIdle is also suppressed while Vulcan owns an active crafting gather stage, preventing mid-plan returns home. Includes live source switching, mob/vendor Go travel, bulletproof retainer-stage ownership, bounded recovery, Recent activity, and retainer greeting auto-dismiss.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Vulcan zoning crash fix: Crafting Status now reads AutoGather state passively and never refreshes the scheduler/teleport-cost cache from the UI during territory transitions. Includes safe crafting return, ordered live gathering status, mob/vendor Go travel, bag-only Vulcan gathering, bulletproof retainer-stage ownership, bounded recovery, Recent activity, and retainer greeting auto-dismiss.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
