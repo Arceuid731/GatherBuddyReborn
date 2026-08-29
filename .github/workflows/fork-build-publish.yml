@@ -28,6 +28,7 @@ jobs:
         run: |
           ./scripts/Apply-ForkPatches.ps1
           ./scripts/Apply-ForkRetainerLiveScanPatches.ps1
+          ./scripts/Apply-ForkRetainerBellInteractionPatches.ps1
           ./scripts/Apply-ForkStatusPatches.ps1
           ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
           ./scripts/Apply-ForkSupplyPlanPatches.ps1
@@ -42,6 +43,9 @@ jobs:
           }
           if ($source -notmatch '_useLiveRetainerScan' -or $source -notmatch 'BuildLiveItemListForCurrentRetainer') {
             throw 'Pooled retainer live-scan fallback is missing after patch step.'
+          }
+          if ($source -notmatch 'BellInteractionSettleMilliseconds' -or $source -notmatch 'Retrying summoning bell interaction') {
+            throw 'Retainer bell settle/retry fix is missing after patch step.'
           }
 
       - name: Verify Vulcan material workflow patches
@@ -186,7 +190,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: retainer restock now falls back to scanning live servant inventories when Allagan Tools reports pooled stock without enough per-retainer mapping, preventing materials that are visibly stored on retainers from being misclassified as manual blockers. Dual-source crafting materials offer a persistent Gather first (free, default) / Vendors first (faster) choice, both routes stay visible, vendor purchases remain grouped by NPC/location, and retainer stock stays visible when restock is OFF. Includes real-node AutoGather filtering, bounded gather recovery, useful-retainer preflight, live blockers, Recent activity, and retainer greeting auto-dismiss.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: retainer bell navigation now waits briefly after movement stops and retries interaction until the bell UI/occupied state confirms success, fixing runs that stopped beside a bell without opening it. Retainer restock also falls back to scanning live servant inventories when Allagan Tools reports pooled stock without enough per-retainer mapping. Dual-source crafting materials offer Gather first / Vendors first routing, grouped vendor purchases, live blockers, bounded gather recovery, Recent activity, and retainer greeting auto-dismiss.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
