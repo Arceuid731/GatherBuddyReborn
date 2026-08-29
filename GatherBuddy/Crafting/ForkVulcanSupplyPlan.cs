@@ -36,9 +36,9 @@ public sealed record VulcanVendorStopHint(
 
 /// <summary>
 /// Fork-local supply planner for crafting materials sold by gil vendors.
-/// Vendor availability is treated as an alternative source, not an unconditional
-/// override: users choose whether dual-source items should be gathered or bought.
-/// Vendor-only materials still use the vendor regardless of that preference.
+/// The selected preference is authoritative and persisted in the plugin config:
+/// GatherFirst disables vendor acquisition/suggestions for the run, while
+/// VendorFirst uses gil vendors whenever one is available and gathers the rest.
 /// </summary>
 public static class ForkVulcanSupplyPlan
 {
@@ -47,6 +47,9 @@ public static class ForkVulcanSupplyPlan
 
     public static VulcanSupplyPreference Preference
         => GatherBuddy.Config.VulcanSupplyPreference;
+
+    public static bool VendorsEnabled
+        => Preference == VulcanSupplyPreference.VendorFirst;
 
     public static void SetPreference(VulcanSupplyPreference preference)
     {
@@ -57,8 +60,8 @@ public static class ForkVulcanSupplyPlan
         GatherBuddy.Config.Save();
         ForkVulcanWorkflowSupport.AddActivity(
             preference == VulcanSupplyPreference.GatherFirst
-                ? "Supply preference changed: gather free materials first; vendor alternatives remain visible."
-                : "Supply preference changed: buy gil-vendor materials first; gathering alternatives remain visible.",
+                ? "Supply preference saved: gather/manual sources only; vendor suggestions are hidden for this and future runs."
+                : "Supply preference saved: use gil vendors whenever available; the choice will be reused for future runs.",
             VulcanActivityKind.Info);
     }
 
@@ -69,9 +72,7 @@ public static class ForkVulcanSupplyPlan
         => IsGilVendorAvailable(itemId) && ForkVulcanWorkflowSupport.IsActuallyAutoGatherable(itemId);
 
     public static bool ShouldUseVendor(uint itemId)
-        => IsGilVendorAvailable(itemId)
-        && (Preference == VulcanSupplyPreference.VendorFirst
-         || !ForkVulcanWorkflowSupport.IsActuallyAutoGatherable(itemId));
+        => VendorsEnabled && IsGilVendorAvailable(itemId);
 
     public static bool HasResolvedGilVendor(uint itemId)
     {
@@ -82,6 +83,9 @@ public static class ForkVulcanSupplyPlan
 
     public static IReadOnlyList<VulcanVendorStopHint> BuildVendorStops(IReadOnlyList<VulcanMaterialBlocker> blockers)
     {
+        if (!VendorsEnabled)
+            return Array.Empty<VulcanVendorStopHint>();
+
         EnsureVendorData();
         if (!VendorShopResolver.IsInitialized)
             return Array.Empty<VulcanVendorStopHint>();
@@ -196,7 +200,7 @@ public static class ForkVulcanSupplyPlan
 
     public static IReadOnlyList<string> GetVendorHintLines(VulcanMaterialBlocker blocker)
     {
-        if (!IsGilVendorAvailable(blocker.ItemId))
+        if (!ShouldUseVendor(blocker.ItemId))
             return Array.Empty<string>();
 
         var hint = GetVendorAlternativeHint(blocker.ItemId, blocker.Missing);
@@ -205,7 +209,7 @@ public static class ForkVulcanSupplyPlan
 
     public static string GetVendorAlternativeHint(uint itemId, int missing)
     {
-        if (!IsGilVendorAvailable(itemId) || missing <= 0)
+        if (!ShouldUseVendor(itemId) || missing <= 0)
             return string.Empty;
 
         EnsureVendorData();
@@ -244,7 +248,7 @@ public static class ForkVulcanSupplyPlan
 
     public static string GetGatherAlternativeHint(uint itemId)
         => HasDualSource(itemId)
-            ? "Gathering alternative available: this item has a real BTN/MIN/FSH source, so Gather first can obtain it without spending gil."
+            ? "Gathering source available: this item has a real BTN/MIN/FSH source."
             : string.Empty;
 
     private static void EnsureVendorData()
