@@ -48,8 +48,8 @@ if ($content -notmatch 'VULCAN PASSIVE STATUS SNAPSHOT') {
 
         public IReadOnlyList<uint> GetVulcanGatherExecutionOrder()
         {
-            if (Dalamud.Conditions[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas]
-             || Dalamud.Conditions[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas51])
+            if (Dalamud.Conditions[ConditionFlag.BetweenAreas]
+             || Dalamud.Conditions[ConditionFlag.BetweenAreas51])
                 return Array.Empty<uint>();
 
             // Enumerate only the already-computed in-memory target list. This is a
