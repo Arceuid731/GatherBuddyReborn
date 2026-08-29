@@ -1,0 +1,37 @@
+[
+  {
+    "Author": "The Combat Reborn Team",
+    "Name": "GatherBuddy Reborn Enhanced",
+    "InternalName": "GatherBuddyReborn",
+    "RepoUrl": "https://github.com/Arceuid731/GatherBuddyReborn",
+    "Description": "Adds commands to simplify gathering by finding nodes and fish and their locations via item name and a UI to keep track of special uptime and weather conditions. Also automatically gathers items based on these conditions using lists that you specify. Automated gathering requires vnavmesh.",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 15,
+    "TestingDalamudApiLevel": 15,
+    "Tags": [
+      "Gathering",
+      "Fishing",
+      "Mining",
+      "Botany",
+      "Weather",
+      "Alarms",
+      "Automatic",
+      "Forager"
+    ],
+    "CategoryTags": [
+      "Jobs",
+      "Utility"
+    ],
+    "IsTestingExclusive": false,
+    "IconUrl": "https://raw.githubusercontent.com/FFXIV-CombatReborn/RebornAssets/main/IconAssets/GBR_Icon.png",
+    "Punchline": "Simplify Gathering and Fishing to the extreme.",
+    "AcceptsFeedback": true,
+    "AssemblyVersion": "7.5.5.46",
+    "TestingAssemblyVersion": "7.5.5.46",
+    "DownloadLinkInstall": "https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip",
+    "DownloadLinkUpdate": "https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip",
+    "DownloadLinkTesting": "https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip",
+    "Changelog": "Vulcan zoning crash fix: Crafting Status now reads AutoGather state passively and never refreshes the scheduler/teleport-cost cache from the UI during territory transitions. Includes safe crafting return, ordered live gathering status, mob/vendor Go travel, bag-only Vulcan gathering, bulletproof retainer-stage ownership, bounded recovery, Recent activity, and retainer greeting auto-dismiss.",
+    "IsHide": false
+  }
+]
