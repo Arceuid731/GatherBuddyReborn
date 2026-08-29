@@ -16,6 +16,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/Apply-ForkPatches.ps1
+          ./scripts/Apply-ForkRetainerLiveScanPatches.ps1
           ./scripts/Apply-ForkStatusPatches.ps1
           ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
           ./scripts/Apply-ForkSupplyPlanPatches.ps1
@@ -24,12 +25,16 @@ jobs:
       - name: Verify fork status patches
         shell: pwsh
         run: |
+          $retainer = Get-Content ./GatherBuddy/Crafting/RetainerTaskExecutor.cs -Raw
           $queue = Get-Content ./GatherBuddy/Crafting/CraftingQueueProcessor.cs -Raw
           $bridge = Get-Content ./GatherBuddy/Crafting/CraftingGatherBridge.cs -Raw
           $status = Get-Content ./GatherBuddy/Gui/CraftingStatusWindow.cs -Raw
           $support = Get-Content ./GatherBuddy/Crafting/ForkVulcanWorkflowSupport.cs -Raw
           $supply = Get-Content ./GatherBuddy/Crafting/ForkVulcanSupplyPlan.cs -Raw
           $config = Get-Content ./GatherBuddy/Config/Configuration.cs -Raw
+          if ($retainer -notmatch '_useLiveRetainerScan' -or $retainer -notmatch 'BuildLiveItemListForCurrentRetainer') {
+            throw 'Pooled retainer live-scan fallback missing.'
+          }
           if ($queue -notmatch 'WaitingForManualMaterials' -or $queue -notmatch 'HasUsefulRetainerWork') {
             throw 'Queue status/retainer preflight patch missing.'
           }
