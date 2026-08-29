@@ -192,3 +192,7 @@ else {
 # Always run the final state-machine guard pass last, after every other fork patch
 # has finished rewriting the bridge/queue source.
 & (Join-Path $PSScriptRoot 'Apply-ForkStateMachineGuards.ps1')
+
+# Retainer bell handoff/reacquire must run after state guards so it can also enrich
+# the fail-closed abort reason surfaced by the queue processor.
+& (Join-Path $PSScriptRoot 'Apply-ForkRetainerBellReliabilityPatches.ps1')
