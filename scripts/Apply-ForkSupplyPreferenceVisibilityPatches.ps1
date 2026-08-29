@@ -59,6 +59,7 @@ $status = Replace-Required $status @'
                 }
             }
 '@ @'
+            // Vendor alternative: intentionally not rendered when GatherFirst is selected.
 '@ 'remove inactive vendor alternatives from gather view'
 
 $status = Replace-Required $status @'
@@ -82,6 +83,7 @@ $status = Replace-Required $status @'
                         "        Free alternative: gatherable with BTN/MIN/FSH (switch to Gather first, then Resume/re-plan).");
                 }
 '@ @'
+                // Free alternative: gatherable source intentionally not rendered while VendorFirst is selected.
 '@ 'remove inactive gathering alternatives from vendor view'
 
 Set-Content -LiteralPath $statusPath -Value $status -Encoding utf8 -NoNewline
