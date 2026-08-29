@@ -17,8 +17,8 @@ jobs:
         run: |
           ./scripts/Apply-ForkPatches.ps1
           ./scripts/Apply-ForkRetainerLiveScanPatches.ps1
-          ./scripts/Apply-ForkRetainerBellInteractionPatches.ps1
           ./scripts/Apply-ForkStatusPatches.ps1
+          ./scripts/Apply-ForkRetainerOrchestrationPatches.ps1
           ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
           ./scripts/Apply-ForkSupplyPlanPatches.ps1
           ./scripts/Apply-ForkSupplyPreferencePatches.ps1
@@ -36,11 +36,20 @@ jobs:
           if ($retainer -notmatch '_useLiveRetainerScan' -or $retainer -notmatch 'BuildLiveItemListForCurrentRetainer') {
             throw 'Pooled retainer live-scan fallback missing.'
           }
-          if ($retainer -notmatch 'BellInteractionSettleMilliseconds' -or $retainer -notmatch 'Retrying summoning bell interaction') {
-            throw 'Retainer bell settle/retry fix missing.'
+          if ($retainer -match 'BellInteractionSettleMilliseconds|Retrying summoning bell interaction') {
+            throw 'Obsolete retainer-bell interaction workaround is still being applied.'
           }
           if ($queue -notmatch 'WaitingForManualMaterials' -or $queue -notmatch 'HasUsefulRetainerWork') {
             throw 'Queue status/retainer preflight patch missing.'
+          }
+          if ($bridge -notmatch 'Retainer stage ownership: queue processor decides exactly once') {
+            throw 'Single-owner retainer-stage orchestration fix missing.'
+          }
+          if ($bridge -match 'var hasRetainerWork = executionPlan\.RetainerRestock') {
+            throw 'Bridge still repeats the retainer preflight after StartQueue.'
+          }
+          if ($bridge -notmatch '_queueProcessor\.CurrentState == CraftingQueueProcessor\.QueueState\.WaitingForGather') {
+            throw 'Bridge material acquisition is not gated by queue state.'
           }
           if ($bridge -notmatch 'BuildGatherPlanSummary' -or $bridge -notmatch 'WaitingForManualMaterials') {
             throw 'Gather plan/manual resume patch missing.'

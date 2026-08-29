@@ -28,8 +28,8 @@ jobs:
         run: |
           ./scripts/Apply-ForkPatches.ps1
           ./scripts/Apply-ForkRetainerLiveScanPatches.ps1
-          ./scripts/Apply-ForkRetainerBellInteractionPatches.ps1
           ./scripts/Apply-ForkStatusPatches.ps1
+          ./scripts/Apply-ForkRetainerOrchestrationPatches.ps1
           ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
           ./scripts/Apply-ForkSupplyPlanPatches.ps1
           ./scripts/Apply-ForkSupplyPreferencePatches.ps1
@@ -44,8 +44,8 @@ jobs:
           if ($source -notmatch '_useLiveRetainerScan' -or $source -notmatch 'BuildLiveItemListForCurrentRetainer') {
             throw 'Pooled retainer live-scan fallback is missing after patch step.'
           }
-          if ($source -notmatch 'BellInteractionSettleMilliseconds' -or $source -notmatch 'Retrying summoning bell interaction') {
-            throw 'Retainer bell settle/retry fix is missing after patch step.'
+          if ($source -match 'BellInteractionSettleMilliseconds|Retrying summoning bell interaction') {
+            throw 'Obsolete retainer-bell interaction workaround is still being applied.'
           }
 
       - name: Verify Vulcan material workflow patches
@@ -63,6 +63,15 @@ jobs:
           }
           if ($bridge -notmatch 'AutoGather could not start the generated crafting-material list') {
             throw 'AutoGather startup guard is missing after patch step.'
+          }
+          if ($bridge -notmatch 'Retainer stage ownership: queue processor decides exactly once') {
+            throw 'Single-owner retainer-stage orchestration fix is missing.'
+          }
+          if ($bridge -match 'var hasRetainerWork = executionPlan\.RetainerRestock') {
+            throw 'CraftingGatherBridge still performs a duplicate retainer preflight.'
+          }
+          if ($bridge -notmatch '_queueProcessor\.CurrentState == CraftingQueueProcessor\.QueueState\.WaitingForGather') {
+            throw 'Bridge does not gate material acquisition on the queue processor state.'
           }
           if ($bridge -notmatch 'BuildGatherPlanSummary') {
             throw 'Detailed gather-plan diagnostics are missing after patch step.'
@@ -86,7 +95,7 @@ jobs:
             throw 'Missing-material craft recovery is missing after patch step.'
           }
           if ($queue -notmatch 'HasUsefulRetainerWork') {
-            throw 'Useful-retainer preflight is missing after patch step.'
+            throw 'Useful-retainer preflight is missing from the queue processor.'
           }
           if ($queue -notmatch 'PauseForManualMaterials') {
             throw 'Dedicated manual-material queue state is missing after patch step.'
@@ -190,7 +199,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fixes: retainer bell navigation now waits briefly after movement stops and retries interaction until the bell UI/occupied state confirms success, fixing runs that stopped beside a bell without opening it. Retainer restock also falls back to scanning live servant inventories when Allagan Tools reports pooled stock without enough per-retainer mapping. Dual-source crafting materials offer Gather first / Vendors first routing, grouped vendor purchases, live blockers, bounded gather recovery, Recent activity, and retainer greeting auto-dismiss.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Fork fix: retainer restock now has one state-machine owner. CraftingGatherBridge no longer repeats the asynchronous retainer preflight after CraftingQueueProcessor starts, preventing bell navigation and Manual Materials from running concurrently. The unnecessary bell-interaction timing workaround was removed. Includes pooled-retainer live scan, grouped vendor/gather preferences, live blockers, bounded gather recovery, Recent activity, and retainer greeting auto-dismiss.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
