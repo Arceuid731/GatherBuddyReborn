@@ -186,6 +186,9 @@ else {
     Write-Host 'Supply preference UI already present.'
 }
 
+# Apply the authoritative source-visibility pass after the selector exists.
+& (Join-Path $PSScriptRoot 'Apply-ForkSupplyPreferenceVisibilityPatches.ps1')
+
 # Always run the final state-machine guard pass last, after every other fork patch
 # has finished rewriting the bridge/queue source.
 & (Join-Path $PSScriptRoot 'Apply-ForkStateMachineGuards.ps1')
