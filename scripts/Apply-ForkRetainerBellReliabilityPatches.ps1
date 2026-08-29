@@ -196,6 +196,8 @@ if ($retainer -notmatch 'RETAINER BELL RELIABILITY') {
             return Abort("A retainer was selected, but its interaction menu never became available.");
 '@ 'preserve retainer-menu timeout reason'
 
+    # Replace both bell-enumeration loops at once. Name + targetability is stable;
+    # ObjectKind is not, especially for housing furnishings.
     $retainer = Replace-Required $retainer @'
         foreach (var obj in Dalamud.Objects)
         {
@@ -206,25 +208,9 @@ if ($retainer -notmatch 'RETAINER BELL RELIABILITY') {
 '@ @'
         foreach (var obj in Dalamud.Objects)
         {
-            // Do not require a specific ObjectKind here. Housing bells can be
-            // surfaced through different wrappers; name + targetability is the
-            // stable signal we actually need.
+            // Housing bells can surface through different object-kind wrappers.
             var name = obj.Name.TextValue;
 '@ 'allow bell candidates regardless of object kind'
-
-    # The same object-kind block exists in FindNearestBell() as well.
-    $retainer = Replace-Required $retainer @'
-        foreach (var obj in Dalamud.Objects)
-        {
-            if (obj.ObjectKind != ObjectKind.HousingEventObject && obj.ObjectKind != ObjectKind.EventObj)
-                continue;
-
-            var name = obj.Name.TextValue;
-'@ @'
-        foreach (var obj in Dalamud.Objects)
-        {
-            var name = obj.Name.TextValue;
-'@ 'allow interaction bell candidates regardless of object kind'
 
     $retainer = Replace-Required $retainer @'
     private void Delay(int ms)
