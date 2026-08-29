@@ -7,22 +7,15 @@ function Replace-Required {
         [Parameter(Mandatory = $true)][string]$New,
         [Parameter(Mandatory = $true)][string]$Label
     )
-
     if (-not $Content.Contains($Old)) {
         throw "Could not apply Vulcan gather-isolation patch '$Label'. Upstream or an earlier fork patch changed."
     }
-
     return $Content.Replace($Old, $New)
 }
 
-# Vulcan's generated crafting list is a bag-targeted acquisition stage. Retainers
-# are handled explicitly before gathering (when restock is ON) or deliberately
-# ignored (when restock is OFF). AutoGather's global CheckRetainers preference must
-# therefore never make a temporary Vulcan target look complete just because the
-# same item exists on a retainer.
+# --- Bag-only temporary Vulcan targets -------------------------------------------
 $extensionsPath = Join-Path $PSScriptRoot '..\GatherBuddy\AutoGather\Extensions\GatherableExtensions.cs'
 $extensions = Get-Content -LiteralPath $extensionsPath -Raw
-
 if ($extensions -notmatch 'VULCAN BAG-ONLY TARGET') {
     $extensions = Replace-Required $extensions @'
     public static int GetTotalCount(this IGatherable gatherable)
@@ -37,48 +30,31 @@ if ($extensions -notmatch 'VULCAN BAG-ONLY TARGET') {
 '@ @'
     public static int GetTotalCount(this IGatherable gatherable)
     {
-        // VULCAN BAG-ONLY TARGET: the crafting supply state machine owns retainer
-        // acquisition separately. A generated crafting gather list must therefore
-        // be satisfied by the player's bags, never by stock that still sits on a
-        // retainer. This override is scoped only to items in Vulcan's temporary list;
-        // normal user AutoGather lists keep the global CheckRetainers behaviour.
+        // VULCAN BAG-ONLY TARGET: retainer acquisition is a separate Vulcan stage.
         var vulcanList = global::GatherBuddy.Crafting.CraftingGatherBridge.GetTemporaryGatherList();
         if (vulcanList is { Enabled: true }
          && vulcanList.Items.Any(item => item.ItemId == gatherable.ItemId))
             return gatherable.GetInventoryCount();
 
         if (GatherBuddy.Config.AutoGatherConfig.CheckRetainers && AllaganTools.Enabled)
-        {
             return (int)AllaganTools.ItemCountOwned(gatherable.ItemId, true, _inventoryTypesArray);
-        }
 
         return gatherable.GetInventoryCount();
     }
 '@ 'use bag counts for temporary Vulcan targets'
-
     Set-Content -LiteralPath $extensionsPath -Value $extensions -Encoding utf8 -NoNewline
-    Write-Host 'Applied Vulcan gather isolation: temporary crafting targets ignore retainer stock.'
-}
-else {
-    Write-Host 'Vulcan bag-only gathering count patch already present.'
 }
 
-# AutoGather normally honors the user's GoHomeWhenIdle preference whenever it has
-# outstanding-but-currently-unavailable targets. During a Vulcan crafting stage,
-# Vulcan owns the workflow and must decide when the stage is complete; AutoGather
-# must not independently send the player home between crafting materials.
+# --- AutoGather ownership + read-only runtime diagnostics -------------------------
 $autoGatherPath = Join-Path $PSScriptRoot '..\GatherBuddy\AutoGather\AutoGather.cs'
 $autoGather = Get-Content -LiteralPath $autoGatherPath -Raw
-
 if ($autoGather -notmatch 'VULCAN OWNS IDLE TRAVEL') {
     $autoGather = Replace-Required $autoGather @'
                 if (!waitAtAetheryte && GatherBuddy.Config.AutoGatherConfig.GoHomeWhenIdle)
                     if (GoHome())
                         return;
 '@ @'
-                // VULCAN OWNS IDLE TRAVEL: while a generated crafting list exists,
-                // never apply AutoGather's personal GoHomeWhenIdle preference between
-                // materials. Stay in the acquisition stage until Vulcan validates it.
+                // VULCAN OWNS IDLE TRAVEL: Vulcan validates completion itself.
                 var vulcanCraftingGatherActive = global::GatherBuddy.Crafting.CraftingGatherBridge.GetTemporaryGatherList()
                     is { Enabled: true };
                 if (!waitAtAetheryte
@@ -91,17 +67,13 @@ if ($autoGather -notmatch 'VULCAN OWNS IDLE TRAVEL') {
 '@ 'prevent GoHomeWhenIdle from interrupting Vulcan gathering'
 }
 
-# Expose only the tiny bit of AutoGather runtime state needed by Crafting Status.
-# This lets the fork display the real current target and the same pending order that
-# AutoGather itself is using, without duplicating its scheduling heuristics.
 if ($autoGather -notmatch 'VULCAN CURRENT GATHER DIAGNOSTIC') {
     $autoGather = Replace-Required $autoGather @'
         private GatherTarget? _currentGatherTarget;
 '@ @'
         private GatherTarget? _currentGatherTarget;
 
-        // VULCAN CURRENT GATHER DIAGNOSTIC: read-only status surface for the
-        // crafting window. It does not alter AutoGather scheduling.
+        // VULCAN CURRENT GATHER DIAGNOSTIC: read-only status data for Crafting Status.
         public uint VulcanCurrentGatherItemId
         {
             get
@@ -113,8 +85,6 @@ if ($autoGather -notmatch 'VULCAN CURRENT GATHER DIAGNOSTIC') {
 
         public IReadOnlyList<uint> GetVulcanGatherExecutionOrder()
         {
-            // Refresh with the same scheduler that Update() uses, then expose only
-            // distinct pending item IDs in its actual execution order.
             _activeItemList.GetNextOrDefault();
             return _activeItemList
                 .Select(target => target.Item?.ItemId ?? 0u)
@@ -124,16 +94,12 @@ if ($autoGather -notmatch 'VULCAN CURRENT GATHER DIAGNOSTIC') {
         }
 '@ 'expose current AutoGather target and execution order'
 }
-
 Set-Content -LiteralPath $autoGatherPath -Value $autoGather -Encoding utf8 -NoNewline
-Write-Host 'Applied Vulcan gather isolation/runtime diagnostics.'
+Write-Host 'Applied Vulcan bag-only/idle-travel isolation and AutoGather diagnostics.'
 
-# Crafting Status should mirror AutoGather rather than alphabetize the plan. The
-# current target is highlighted, pending items follow in AutoGather execution order,
-# and completed targets move below the remaining work.
+# --- Crafting Status follows real AutoGather order -------------------------------
 $statusPath = Join-Path $PSScriptRoot '..\GatherBuddy\Gui\CraftingStatusWindow.cs'
 $status = Get-Content -LiteralPath $statusPath -Raw
-
 if ($status -notmatch 'VULCAN AUTO-GATHER ORDER') {
     $status = Replace-Required $status @'
         var targets = ForkVulcanWorkflowSupport.GetGatherTargetStatus();
@@ -144,8 +110,7 @@ if ($status -notmatch 'VULCAN AUTO-GATHER ORDER') {
         if (targets.Count == 0)
             return;
 
-        // VULCAN AUTO-GATHER ORDER: show the exact pending order selected by
-        // AutoGather and make the item currently being worked on obvious.
+        // VULCAN AUTO-GATHER ORDER: pending work mirrors AutoGather's scheduler.
         var currentGatherItemId = GatherBuddy.AutoGather.VulcanCurrentGatherItemId;
         var executionOrder = GatherBuddy.AutoGather.GetVulcanGatherExecutionOrder();
         var executionIndex = executionOrder
@@ -158,6 +123,7 @@ if ($status -notmatch 'VULCAN AUTO-GATHER ORDER') {
             .ToList();
 '@ 'order Crafting Status targets like AutoGather'
 
+    # Supply-plan patches already added the retainer hint between suffix and render.
     $status = Replace-Required $status @'
             var color = target.Complete
                 ? new System.Numerics.Vector4(0.45f, 1.0f, 0.55f, 1.0f)
@@ -165,7 +131,11 @@ if ($status -notmatch 'VULCAN AUTO-GATHER ORDER') {
             var suffix = target.Complete
                 ? "ready"
                 : $"{target.Remaining} remaining";
-            ImGui.TextColored(color, $"- {target.ItemName}: {target.CurrentQuantity}/{target.TargetQuantity} ({suffix})");
+            var retainerSuffix = target.RetainerAvailable > 0
+                ? $" — Retainers: {target.RetainerAvailable} available (restock OFF)"
+                : string.Empty;
+            ImGui.TextColored(color, $"- {target.ItemName}: {target.CurrentQuantity}/{target.TargetQuantity} ({suffix}){retainerSuffix}");
+            // Vendor alternative: intentionally not rendered when GatherFirst is selected.
 '@ @'
             var isCurrent = !target.Complete && target.ItemId == currentGatherItemId;
             var color = target.Complete
@@ -178,7 +148,11 @@ if ($status -notmatch 'VULCAN AUTO-GATHER ORDER') {
                 : isCurrent
                     ? $"{target.Remaining} remaining — gathering now"
                     : $"{target.Remaining} remaining";
-            ImGui.TextColored(color, $"{(isCurrent ? ">" : "-")} {target.ItemName}: {target.CurrentQuantity}/{target.TargetQuantity} ({suffix})");
+            var retainerSuffix = target.RetainerAvailable > 0
+                ? $" — Retainers: {target.RetainerAvailable} available (restock OFF)"
+                : string.Empty;
+            ImGui.TextColored(color, $"{(isCurrent ? ">" : "-")} {target.ItemName}: {target.CurrentQuantity}/{target.TargetQuantity} ({suffix}){retainerSuffix}");
+            // Vendor alternative: intentionally not rendered when GatherFirst is selected.
 '@ 'highlight current AutoGather target'
 
     $status = Replace-Required $status @'
@@ -190,19 +164,12 @@ if ($status -notmatch 'VULCAN AUTO-GATHER ORDER') {
 '@ 'show safe-return stage in Crafting Status'
 
     Set-Content -LiteralPath $statusPath -Value $status -Encoding utf8 -NoNewline
-    Write-Host 'Applied Crafting Status AutoGather current-target/order display.'
 }
-else {
-    Write-Host 'Crafting Status AutoGather order patch already present.'
-}
+Write-Host 'Applied ordered/current AutoGather display in Crafting Status.'
 
-# Once every material is physically in the bags, never begin crafting in a hostile
-# field zone. If the game does not report a sanctuary, reuse GatherBuddy's existing
-# HomeNavigationHelper/Lifestream route and require a confirmed sanctuary before the
-# queue is allowed to leave WaitingForGather.
+# --- Require a confirmed sanctuary before crafting -------------------------------
 $bridgePath = Join-Path $PSScriptRoot '..\GatherBuddy\Crafting\CraftingGatherBridge.cs'
 $bridge = Get-Content -LiteralPath $bridgePath -Raw
-
 if ($bridge -notmatch 'VULCAN SAFE CRAFTING RETURN') {
     $bridge = Replace-Required $bridge @'
     private static bool _waitingForCollectablesHomeReturn = false;
@@ -211,14 +178,12 @@ if ($bridge -notmatch 'VULCAN SAFE CRAFTING RETURN') {
     private static bool _waitingForCollectablesHomeReturn = false;
     private static bool _collectablesHomeReturnStarted = false;
 
-    // VULCAN SAFE CRAFTING RETURN: materials may have been gathered/farmed in a
-    // hostile zone. Craft only after the game confirms a sanctuary.
+    // VULCAN SAFE CRAFTING RETURN: never synthesize in an unconfirmed field area.
     private static bool _waitingForSafeCraftingReturn = false;
     private static bool _safeCraftingReturnStarted = false;
     private static bool _safeCraftingReturnObservedBusy = false;
     private static DateTime _safeCraftingReturnStartedAt = DateTime.MinValue;
     private static DateTime _safeCraftingReturnIdleSince = DateTime.MinValue;
-
     public static bool WaitingForSafeCraftingReturn => _waitingForSafeCraftingReturn;
 '@ 'add safe crafting return state'
 
@@ -281,9 +246,7 @@ if ($bridge -notmatch 'VULCAN SAFE CRAFTING RETURN') {
             {
                 if (string.IsNullOrWhiteSpace(error))
                     return;
-
-                FailSafeCraftingReturn(
-                    $"All materials are ready, but Vulcan could not return to a safe crafting area: {error} Press Resume to retry; crafting will not start here.");
+                FailSafeCraftingReturn($"All materials are ready, but Vulcan could not return to a safe crafting area: {error} Press Resume to retry; crafting will not start here.");
                 return;
             }
 
@@ -303,9 +266,6 @@ if ($bridge -notmatch 'VULCAN SAFE CRAFTING RETURN') {
             return;
         }
 
-        // IPC may take a moment to report busy after accepting a command and the
-        // sanctuary flag may lag the final zone transition by a few frames. Give
-        // both a short settle window before deciding the return failed.
         if (_safeCraftingReturnIdleSince == DateTime.MinValue)
         {
             _safeCraftingReturnIdleSince = DateTime.UtcNow;
@@ -332,9 +292,7 @@ if ($bridge -notmatch 'VULCAN SAFE CRAFTING RETURN') {
     private static void CompleteSafeCraftingReturn()
     {
         ResetSafeCraftingReturnState();
-        ForkVulcanWorkflowSupport.AddActivity(
-            "Safe crafting area confirmed; continuing to crafting.",
-            VulcanActivityKind.Success);
+        ForkVulcanWorkflowSupport.AddActivity("Safe crafting area confirmed; continuing to crafting.", VulcanActivityKind.Success);
         _queueProcessor?.OnGatherComplete();
     }
 
@@ -350,7 +308,6 @@ if ($bridge -notmatch 'VULCAN SAFE CRAFTING RETURN') {
     {
         if (abortTravel && _waitingForSafeCraftingReturn && Lifestream.Enabled && Lifestream.IsBusy())
             Lifestream.Abort();
-
         _waitingForSafeCraftingReturn = false;
         _safeCraftingReturnStarted = false;
         _safeCraftingReturnObservedBusy = false;
@@ -382,21 +339,15 @@ if ($bridge -notmatch 'VULCAN SAFE CRAFTING RETURN') {
             return;
 '@ 'require sanctuary before crafting'
 
-    # Stop means stop: if Vulcan itself initiated a home return, cancel that Lifestream
-    # request as part of the queue lifecycle rather than leaving it running detached.
     $bridge = [regex]::Replace(
         $bridge,
         '(public\s+static\s+void\s+StopQueue\(\)\s*\{)',
         '$1' + "`n        ResetSafeCraftingReturnState(abortTravel: true);",
         1)
-
     if ($bridge -notmatch 'ResetSafeCraftingReturnState\(abortTravel: true\)') {
         throw "Could not apply Vulcan gather-isolation patch 'cancel safe return on Stop'."
     }
 
     Set-Content -LiteralPath $bridgePath -Value $bridge -Encoding utf8 -NoNewline
-    Write-Host 'Applied safe crafting-area return before synthesis.'
 }
-else {
-    Write-Host 'Safe crafting-area return patch already present.'
-}
+Write-Host 'Applied sanctuary-gated safe return before crafting.'
