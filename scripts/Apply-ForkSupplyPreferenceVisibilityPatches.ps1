@@ -4,7 +4,7 @@ function Replace-Required {
     param(
         [Parameter(Mandatory = $true)][string]$Content,
         [Parameter(Mandatory = $true)][string]$Old,
-        [Parameter(Mandatory = $true)][string]$New,
+        [AllowEmptyString()][Parameter(Mandatory = $true)][string]$New,
         [Parameter(Mandatory = $true)][string]$Label
     )
 
