@@ -23,6 +23,7 @@ jobs:
           ./scripts/Apply-ForkSupplyPlanPatches.ps1
           ./scripts/Apply-ForkSupplyPreferencePatches.ps1
           ./scripts/Apply-ForkManualSourceTravelPatches.ps1
+          ./scripts/Apply-ForkVulcanGatherIsolationPatches.ps1
 
       - name: Verify fork status patches
         shell: pwsh
@@ -37,6 +38,8 @@ jobs:
           $mobSources = Get-Content ./GatherBuddy/Crafting/ForkVulcanMobSources.cs -Raw
           $plugin = Get-Content ./GatherBuddy/GatherBuddy.cs -Raw
           $config = Get-Content ./GatherBuddy/Config/Configuration.cs -Raw
+          $gatherExtensions = Get-Content ./GatherBuddy/AutoGather/Extensions/GatherableExtensions.cs -Raw
+          $autoGather = Get-Content ./GatherBuddy/AutoGather/AutoGather.cs -Raw
           if ($retainer -notmatch '_useLiveRetainerScan' -or $retainer -notmatch 'BuildLiveItemListForCurrentRetainer') {
             throw 'Pooled retainer live-scan fallback missing.'
           }
@@ -96,6 +99,12 @@ jobs:
           }
           if ($config -notmatch 'VulcanSupplyPreference.*GatherFirst') {
             throw 'Persistent GatherFirst default missing.'
+          }
+          if ($gatherExtensions -notmatch 'VULCAN BAG-ONLY TARGET' -or $gatherExtensions -notmatch 'GetTemporaryGatherList') {
+            throw 'Vulcan temporary gathering still allows retainer stock to satisfy bag targets.'
+          }
+          if ($autoGather -notmatch 'VULCAN OWNS IDLE TRAVEL' -or $autoGather -notmatch 'vulcanCraftingGatherActive') {
+            throw 'AutoGather GoHomeWhenIdle is not isolated from the Vulcan crafting gather stage.'
           }
 
       - name: Set up .NET

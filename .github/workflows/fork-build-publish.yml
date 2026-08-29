@@ -34,6 +34,7 @@ jobs:
           ./scripts/Apply-ForkSupplyPlanPatches.ps1
           ./scripts/Apply-ForkSupplyPreferencePatches.ps1
           ./scripts/Apply-ForkManualSourceTravelPatches.ps1
+          ./scripts/Apply-ForkVulcanGatherIsolationPatches.ps1
 
       - name: Verify retainer fixes
         shell: pwsh
@@ -61,6 +62,8 @@ jobs:
           $mobSources = Get-Content ./GatherBuddy/Crafting/ForkVulcanMobSources.cs -Raw
           $plugin = Get-Content ./GatherBuddy/GatherBuddy.cs -Raw
           $config = Get-Content ./GatherBuddy/Config/Configuration.cs -Raw
+          $gatherExtensions = Get-Content ./GatherBuddy/AutoGather/Extensions/GatherableExtensions.cs -Raw
+          $autoGather = Get-Content ./GatherBuddy/AutoGather/AutoGather.cs -Raw
 
           if ($bridge -notmatch 'Gather completion reached for queue mode; validating material plan') {
             throw 'Material preflight guard is missing after patch step.'
@@ -155,6 +158,12 @@ jobs:
           if ($config -notmatch 'VulcanSupplyPreference.*GatherFirst') {
             throw 'Persistent GatherFirst default is missing from configuration.'
           }
+          if ($gatherExtensions -notmatch 'VULCAN BAG-ONLY TARGET' -or $gatherExtensions -notmatch 'GetTemporaryGatherList') {
+            throw 'Vulcan temporary gathering still allows retainer stock to satisfy bag targets.'
+          }
+          if ($autoGather -notmatch 'VULCAN OWNS IDLE TRAVEL' -or $autoGather -notmatch 'vulcanCraftingGatherActive') {
+            throw 'AutoGather GoHomeWhenIdle is not isolated from the Vulcan crafting gather stage.'
+          }
 
       - name: Set plugin version
         shell: pwsh
@@ -215,7 +224,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Enhanced supply UX: switching Vendor first/Gather first now reclassifies blocked materials live in both directions. Monster drop locations and grouped vendor stops expose Go actions that place a map flag and reuse Vulcan travel routing to bring the player to the source while the queue remains paused; farming/purchasing and Resume remain explicitly manual. Includes bulletproof retainer-stage ownership, pooled-retainer live scan, bounded gather recovery, Recent activity, and retainer greeting auto-dismiss.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Vulcan gathering isolation fix: temporary crafting gather targets now use bag counts only, so AutoGather cannot skip a missing crafting material merely because copies exist on retainers when restock is off (or after the retainer stage is already complete). AutoGather GoHomeWhenIdle is also suppressed while Vulcan owns an active crafting gather stage, preventing mid-plan returns home. Includes live source switching, mob/vendor Go travel, bulletproof retainer-stage ownership, bounded recovery, Recent activity, and retainer greeting auto-dismiss.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
