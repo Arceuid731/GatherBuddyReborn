@@ -14,8 +14,12 @@ namespace GatherBuddy.Crafting;
 public static class ForkVulcanManualTravel
 {
     private static readonly VendorNavigator Navigator = new();
+    private const float CoordinateArrivalRadius = 8.0f;
 
     private static bool _active;
+    private static bool _coordinateArrivalMode;
+    private static uint _destinationTerritoryId;
+    private static Vector3 _destinationPosition;
     private static string _destinationLabel = string.Empty;
     private static string _statusText = string.Empty;
     private static int _missingQuantity;
@@ -49,6 +53,9 @@ public static class ForkVulcanManualTravel
             worldPosition,
             VendorNpcLocationSource.Override);
 
+        _coordinateArrivalMode = true;
+        _destinationTerritoryId = location.TerritoryTypeId;
+        _destinationPosition = worldPosition;
         _destinationLabel = $"{location.MobName} — {location.ZoneName} (X {location.MapX:F1}, Y {location.MapY:F1})";
         _missingQuantity = Math.Max(0, missingQuantity);
         Start(target, $"Travelling to {_destinationLabel}...");
@@ -69,6 +76,9 @@ public static class ForkVulcanManualTravel
             return false;
         }
 
+        _coordinateArrivalMode = false;
+        _destinationTerritoryId = location.TerritoryId;
+        _destinationPosition = location.Position;
         _destinationLabel = stop.MapX.HasValue && stop.MapY.HasValue
             ? $"{stop.NpcName} — {stop.ZoneName} (X {stop.MapX.Value:F1}, Y {stop.MapY.Value:F1})"
             : $"{stop.NpcName} — {stop.ZoneName}";
@@ -85,15 +95,29 @@ public static class ForkVulcanManualTravel
         if (!_active)
             return;
 
-        Navigator.Update();
-        if (Navigator.IsReadyToPurchase)
+        // Mob destinations are coordinates, not interactable vendors. VendorNavigator
+        // can route to them perfectly, but its ReadyToPurchase state is intentionally
+        // vendor-specific and therefore never becomes true for NpcId=0. Validate the
+        // coordinate arrival ourselves and relinquish vnavmesh ownership immediately.
+        if (_coordinateArrivalMode && HasReachedCoordinateDestination())
         {
-            Navigator.Stop();
-            _active = false;
-            _statusText = _missingQuantity > 0
-                ? $"Arrived: {_destinationLabel}. Farm as many as you want (currently need {_missingQuantity}), then press Resume when ready."
-                : $"Arrived: {_destinationLabel}. Buy what you need, then press Resume when ready.";
-            ForkVulcanWorkflowSupport.AddActivity(_statusText, VulcanActivityKind.Success);
+            CompleteArrival();
+            return;
+        }
+
+        Navigator.Update();
+
+        // Check again after the navigator update so arrival on this frame stops the
+        // path before a subsequent frame can re-path the player back to the marker.
+        if (_coordinateArrivalMode && HasReachedCoordinateDestination())
+        {
+            CompleteArrival();
+            return;
+        }
+
+        if (!_coordinateArrivalMode && Navigator.IsReadyToPurchase)
+        {
+            CompleteArrival();
         }
         else if (Navigator.IsFailed)
         {
@@ -108,10 +132,39 @@ public static class ForkVulcanManualTravel
     {
         Navigator.Stop();
         _active = false;
+        _coordinateArrivalMode = false;
+        _destinationTerritoryId = 0;
+        _destinationPosition = default;
         _destinationLabel = string.Empty;
         _missingQuantity = 0;
         if (clearStatus)
             _statusText = string.Empty;
+    }
+
+    private static bool HasReachedCoordinateDestination()
+    {
+        if (!_coordinateArrivalMode || _destinationTerritoryId == 0)
+            return false;
+        if (Dalamud.ClientState.TerritoryType != _destinationTerritoryId)
+            return false;
+
+        var player = Dalamud.Objects.LocalPlayer;
+        if (player == null)
+            return false;
+
+        var dx = player.Position.X - _destinationPosition.X;
+        var dz = player.Position.Z - _destinationPosition.Z;
+        return (dx * dx) + (dz * dz) <= CoordinateArrivalRadius * CoordinateArrivalRadius;
+    }
+
+    private static void CompleteArrival()
+    {
+        Navigator.Stop();
+        _active = false;
+        _statusText = _missingQuantity > 0
+            ? $"Arrived: {_destinationLabel}. Farm as many as you want (currently need {_missingQuantity}), then press Resume when ready."
+            : $"Arrived: {_destinationLabel}. Buy what you need, then press Resume when ready.";
+        ForkVulcanWorkflowSupport.AddActivity(_statusText, VulcanActivityKind.Success);
     }
 
     private static void Start(VendorNpcLocation target, string status)

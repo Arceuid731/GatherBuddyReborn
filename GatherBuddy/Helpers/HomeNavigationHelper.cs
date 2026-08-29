@@ -1,5 +1,6 @@
 using System;
 using Dalamud.Game.ClientState.Conditions;
+using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using GatherBuddy.Plugin;
 
 namespace GatherBuddy.Helpers;
@@ -8,6 +9,17 @@ public static class HomeNavigationHelper
 {
     public static bool ShouldReturnHomeAfterCollectables()
         => GatherBuddy.Config.AutoGatherConfig.GoHomeWhenIdle;
+
+    /// <summary>
+    /// Crafting automation may safely remain where it is when the game reports the
+    /// player is inside a sanctuary. This is the same game-side sanctuary signal
+    /// used by Lifestream when deciding whether it needs to move before travel.
+    /// </summary>
+    public static unsafe bool IsInSafeCraftingArea()
+    {
+        var territoryInfo = TerritoryInfo.Instance();
+        return territoryInfo != null && territoryInfo->InSanctuary;
+    }
 
     public static bool TryStartReturnHome(out string? error)
     {
