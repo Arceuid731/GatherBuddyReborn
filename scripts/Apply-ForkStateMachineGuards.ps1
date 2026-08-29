@@ -32,17 +32,19 @@ $bridge = Get-Content -LiteralPath $bridgePath -Raw
 
 if ($bridge -notmatch 'HARD STATE GUARD: material acquisition') {
     # Do not advertise a gather wait while a retainer stage is still active.
-    $bridge = Replace-RegexRequired $bridge 
-        '(public\s+static\s+void\s+StartQueueCraftAndGather\([^\)]*\)\s*\{.*?_queueProcessor\.QueueCompleted\s*\+=\s*OnQueueCompleted;\s*)_waitingForGatherComplete\s*=\s*true;' 
-        { param($m) $m.Groups[1].Value + '_waitingForGatherComplete = false; // Retainer/gather stage has not been validated yet.' } 
-        'do not pre-arm gather completion before queue state is known'
+    $bridge = Replace-RegexRequired `
+        -Content $bridge `
+        -Pattern '(public\s+static\s+void\s+StartQueueCraftAndGather\([^\)]*\)\s*\{.*?_queueProcessor\.QueueCompleted\s*\+=\s*OnQueueCompleted;\s*)_waitingForGatherComplete\s*=\s*true;' `
+        -Replacement { param($m) $m.Groups[1].Value + '_waitingForGatherComplete = false; // Retainer/gather stage has not been validated yet.' } `
+        -Label 'do not pre-arm gather completion before queue state is known'
 
     # Every queue-mode material acquisition attempt must be authorized by the
     # queue processor state. This protects against stale framework callbacks,
     # AutoGather callbacks, Resume races, and future orchestration changes.
-    $bridge = Replace-RegexRequired $bridge 
-        '(public\s+static\s+void\s+CreateGatherListForMissingIngredients\(Dictionary<uint,\s*int>\s+missing\)\s*\{\s*)' 
-        {
+    $bridge = Replace-RegexRequired `
+        -Content $bridge `
+        -Pattern '(public\s+static\s+void\s+CreateGatherListForMissingIngredients\(Dictionary<uint,\s*int>\s+missing\)\s*\{\s*)' `
+        -Replacement {
             param($m)
             $guard = @'
         // HARD STATE GUARD: material acquisition is legal only after the queue
@@ -60,14 +62,15 @@ if ($bridge -notmatch 'HARD STATE GUARD: material acquisition') {
 
 '@
             return $m.Groups[1].Value + $guard
-        } 
-        'guard material acquisition entry point'
+        } `
+        -Label 'guard material acquisition entry point'
 
     # Even if a stale AutoGather completion callback fires, it must not mutate a
     # retainer-stage queue into Manual/Gather/Craft.
-    $bridge = Replace-RegexRequired $bridge 
-        '(public\s+static\s+void\s+OnGatherComplete\(\)\s*\{\s*if\s*\(_isQueueMode\s*&&\s*_queueProcessor\s*!=\s*null\)\s*\{\s*)' 
-        {
+    $bridge = Replace-RegexRequired `
+        -Content $bridge `
+        -Pattern '(public\s+static\s+void\s+OnGatherComplete\(\)\s*\{\s*if\s*\(_isQueueMode\s*&&\s*_queueProcessor\s*!=\s*null\)\s*\{\s*)' `
+        -Replacement {
             param($m)
             $guard = @'
             // HARD STATE GUARD: stale gather completion callbacks are harmless.
@@ -83,8 +86,8 @@ if ($bridge -notmatch 'HARD STATE GUARD: material acquisition') {
 
 '@
             return $m.Groups[1].Value + $guard
-        } 
-        'guard gather completion entry point'
+        } `
+        -Label 'guard gather completion entry point'
 
     Set-Content -LiteralPath $bridgePath -Value $bridge -Encoding utf8 -NoNewline
     Write-Host 'Applied hard state guards to CraftingGatherBridge.'
@@ -99,9 +102,10 @@ $queue = Get-Content -LiteralPath $queuePath -Raw
 if ($queue -notmatch 'HARD STATE GUARD: manual-material pause') {
     # Manual blockers are a child stage of WaitingForGather. They may NEVER steal
     # ownership from bell navigation or retainer withdrawal.
-    $queue = Replace-RegexRequired $queue 
-        '(public\s+void\s+PauseForManualMaterials\(string\s+reason\)\s*\{\s*)' 
-        {
+    $queue = Replace-RegexRequired `
+        -Content $queue `
+        -Pattern '(public\s+void\s+PauseForManualMaterials\(string\s+reason\)\s*\{\s*)' `
+        -Replacement {
             param($m)
             $guard = @'
         // HARD STATE GUARD: manual-material pause is legal only from the material
@@ -118,14 +122,15 @@ if ($queue -notmatch 'HARD STATE GUARD: manual-material pause') {
 
 '@
             return $m.Groups[1].Value + $guard
-        } 
-        'guard manual-material pause'
+        } `
+        -Label 'guard manual-material pause'
 
     # A retainer executor abort is NOT a successful restock. Pause in the retainer
     # state and let Resume retry it instead of silently progressing to materials.
-    $queue = Replace-RegexRequired $queue 
-        '(_tasks\.Add\(\(\)\s*=>\s*\{\s*)TransitionFromRetainerWithdrawComplete\(\);\s*return\s+CraftingTasks\.TaskResult\.Done;\s*\}\);' 
-        {
+    $queue = Replace-RegexRequired `
+        -Content $queue `
+        -Pattern '(_tasks\.Add\(\(\)\s*=>\s*\{\s*)TransitionFromRetainerWithdrawComplete\(\);\s*return\s+CraftingTasks\.TaskResult\.Done;\s*\}\);' `
+        -Replacement {
             param($m)
             $replacement = @'
             if (_retainerExecutor?.IsAborted == true)
@@ -142,14 +147,15 @@ if ($queue -notmatch 'HARD STATE GUARD: manual-material pause') {
         });
 '@
             return $m.Groups[1].Value + $replacement
-        } 
-        'do not treat aborted retainer withdrawal as success'
+        } `
+        -Label 'do not treat aborted retainer withdrawal as success'
 
     # The transition itself also validates its parent state, so a stale queued task
     # cannot advance the machine after some unrelated state change.
-    $queue = Replace-RegexRequired $queue 
-        '(private\s+unsafe\s+void\s+TransitionFromRetainerWithdrawComplete\(\)\s*\{\s*)' 
-        {
+    $queue = Replace-RegexRequired `
+        -Content $queue `
+        -Pattern '(private\s+unsafe\s+void\s+TransitionFromRetainerWithdrawComplete\(\)\s*\{\s*)' `
+        -Replacement {
             param($m)
             $guard = @'
         // HARD STATE GUARD: this transition is the sole successful exit from the
@@ -166,8 +172,8 @@ if ($queue -notmatch 'HARD STATE GUARD: manual-material pause') {
 
 '@
             return $m.Groups[1].Value + $guard
-        } 
-        'guard retainer completion transition'
+        } `
+        -Label 'guard retainer completion transition'
 
     Set-Content -LiteralPath $queuePath -Value $queue -Encoding utf8 -NoNewline
     Write-Host 'Applied hard state guards to CraftingQueueProcessor.'
