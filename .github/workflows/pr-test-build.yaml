@@ -17,6 +17,7 @@ jobs:
         run: |
           ./scripts/Apply-ForkPatches.ps1
           ./scripts/Apply-ForkRetainerLiveScanPatches.ps1
+          ./scripts/Apply-ForkRetainerBellInteractionPatches.ps1
           ./scripts/Apply-ForkStatusPatches.ps1
           ./scripts/Apply-ForkGatherLoopGuardPatches.ps1
           ./scripts/Apply-ForkSupplyPlanPatches.ps1
@@ -34,6 +35,9 @@ jobs:
           $config = Get-Content ./GatherBuddy/Config/Configuration.cs -Raw
           if ($retainer -notmatch '_useLiveRetainerScan' -or $retainer -notmatch 'BuildLiveItemListForCurrentRetainer') {
             throw 'Pooled retainer live-scan fallback missing.'
+          }
+          if ($retainer -notmatch 'BellInteractionSettleMilliseconds' -or $retainer -notmatch 'Retrying summoning bell interaction') {
+            throw 'Retainer bell settle/retry fix missing.'
           }
           if ($queue -notmatch 'WaitingForManualMaterials' -or $queue -notmatch 'HasUsefulRetainerWork') {
             throw 'Queue status/retainer preflight patch missing.'
