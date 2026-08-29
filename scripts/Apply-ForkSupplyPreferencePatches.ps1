@@ -185,3 +185,7 @@ if ($status -notmatch 'DrawSupplyPreference\(') {
 else {
     Write-Host 'Supply preference UI already present.'
 }
+
+# Always run the final state-machine guard pass last, after every other fork patch
+# has finished rewriting the bridge/queue source.
+& (Join-Path $PSScriptRoot 'Apply-ForkStateMachineGuards.ps1')
