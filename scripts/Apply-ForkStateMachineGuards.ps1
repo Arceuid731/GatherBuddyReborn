@@ -125,8 +125,9 @@ if ($queue -notmatch 'HARD STATE GUARD: manual-material pause') {
         } `
         -Label 'guard manual-material pause'
 
-    # A retainer executor abort is NOT a successful restock. Pause in the retainer
-    # state and let Resume retry it instead of silently progressing to materials.
+    # A retainer executor abort is NOT a successful restock. Keep ownership of the
+    # retainer stage and pause fail-closed. Do not call Pause() from inside the task
+    # callback because Pause() clears _tasks while ProcessTasks() is iterating it.
     $queue = Replace-RegexRequired `
         -Content $queue `
         -Pattern '(_tasks\.Add\(\(\)\s*=>\s*\{\s*)TransitionFromRetainerWithdrawComplete\(\);\s*return\s+CraftingTasks\.TaskResult\.Done;\s*\}\);' `
@@ -138,7 +139,14 @@ if ($queue -notmatch 'HARD STATE GUARD: manual-material pause') {
                 var reason = "Retainer restock did not complete. The queue will not advance until the retainer step succeeds; press Resume to retry.";
                 GatherBuddy.Log.Warning($"[CraftingQueueProcessor] {reason}");
                 ForkVulcanWorkflowSupport.AddActivity(reason, VulcanActivityKind.Error);
-                Pause(reason);
+
+                // Fail closed without mutating the task list from inside its own
+                // callback. ProcessTasks() will remove this completed callback
+                // normally; Resume() will rebuild a fresh retainer executor.
+                _retainerExecutor = null;
+                _paused = true;
+                _pauseReason = reason;
+                YesAlready.Unlock();
                 return CraftingTasks.TaskResult.Done;
             }
 
