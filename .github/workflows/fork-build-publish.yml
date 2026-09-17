@@ -36,14 +36,12 @@ jobs:
           ./scripts/Apply-ForkManualSourceTravelPatches.ps1
           ./scripts/Apply-ForkVulcanGatherIsolationPatches.ps1
           ./scripts/Apply-ForkZoningCrashGuard.ps1
+          ./scripts/Verify-UpstreamFixes.ps1
 
       - name: Verify retainer fixes
         shell: pwsh
         run: |
           $source = Get-Content ./GatherBuddy/Crafting/RetainerTaskExecutor.cs -Raw
-          if ($source -notmatch 'Retainer greeting visible, dismissing|Dismissing Talk dialog before retainer menu') {
-            throw 'Retainer greeting fix is missing after patch step.'
-          }
           if ($source -notmatch '_useLiveRetainerScan' -or $source -notmatch 'BuildLiveItemListForCurrentRetainer') {
             throw 'Pooled retainer live-scan fallback is missing after patch step.'
           }
@@ -237,7 +235,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Updated fishing windows and legendary fish data; improved spearfishing, AutoHook presets, gearset switching, quick synthesis, vendors and Raphael validation. Preserved Enhanced material planning, bag-only Vulcan gathering, retainer recovery and safe crafting return.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Removed obsolete fork patches now supplied upstream. Added checks against duplicate retainer greeting handlers; preserved Enhanced material planning and inventory isolation.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8

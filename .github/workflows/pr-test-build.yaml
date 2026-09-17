@@ -25,6 +25,7 @@ jobs:
           ./scripts/Apply-ForkManualSourceTravelPatches.ps1
           ./scripts/Apply-ForkVulcanGatherIsolationPatches.ps1
           ./scripts/Apply-ForkZoningCrashGuard.ps1
+          ./scripts/Verify-UpstreamFixes.ps1
 
       - name: Verify fork status patches
         shell: pwsh
