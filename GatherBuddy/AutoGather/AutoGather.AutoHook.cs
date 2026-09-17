@@ -66,7 +66,11 @@ public partial class AutoGather
                 AutoHook.SetPreset?.Invoke(AutoHookGlobalPresetSelectionSentinel);
             if (target.Fish.IsSpearFish)
             {
-                AutoHook.SetAutoGigState?.Invoke(true);
+                if (AutoHook.SetAutoGigState == null)
+                    return;
+
+                AutoHook.SetAutoGigState.Invoke(true);
+                _autoHookSetupComplete = true;
             }
             else
             {
@@ -112,20 +116,15 @@ public partial class AutoGather
             var presetFish = target.Fish;
             if (!isIntuitionFish && target.Fish.Predators.Any())
             {
-                // Only check FIRST predator for shadow node spawning (rest are caught within shadow node)
-                var (firstPredator, requiredCount) = target.Fish.Predators.First();
-                var caughtCount = SpearfishingSessionCatches.TryGetValue(firstPredator.ItemId, out var count) ? count : 0;
-                var firstPredatorMet = caughtCount >= requiredCount;
-                
-                if (!firstPredatorMet)
+                var firstPredator = target.Fish.Predators.First().Item1;
+                if (target.FishingSpot?.IsShadowNode != true)
                 {
-                    // Use first predator fish as preset
                     presetFish = firstPredator;
-                    GatherBuddy.Log.Debug($"[AutoGather] Target fish {target.Fish.Name[GatherBuddy.Language]} first predator not met, using prerequisite fish {presetFish.Name[GatherBuddy.Language]} for preset");
+                    GatherBuddy.Log.Debug($"[AutoGather] Target fish {target.Fish.Name[GatherBuddy.Language]} is at its parent node, using prerequisite fish {presetFish.Name[GatherBuddy.Language]} for preset");
                 }
                 else
                 {
-                    GatherBuddy.Log.Debug($"[AutoGather] Target fish {target.Fish.Name[GatherBuddy.Language]} first predator met, using target fish for preset");
+                    GatherBuddy.Log.Debug($"[AutoGather] Target fish {target.Fish.Name[GatherBuddy.Language]} is at its shadow node, using target fish for preset");
                 }
             }
             
@@ -280,15 +279,23 @@ public partial class AutoGather
                 }
                 else
                 {
-                    AutoHook.SetPreset?.Invoke(_currentAutoHookPresetName);
-                    AutoHook.DeleteSelectedPreset?.Invoke();
-                    GatherBuddy.Log.Debug($"[AutoGather] Deleted GBR-generated preset '{_currentAutoHookPresetName}'");
-                    
-                    if (_currentAutoHookTargetPresetName != null)
+                    if (_currentAutoHookTarget.HasValue && _currentAutoHookTarget.Value.Fish?.IsSpearFish == true)
                     {
-                        AutoHook.SetPreset?.Invoke(_currentAutoHookTargetPresetName);
+                        GatherBuddy.Log.Warning(
+                            $"[AutoGather] Generated AutoGig preset '{_currentAutoHookPresetName}' remains in AutoHook because AutoHook does not expose AutoGig preset deletion via IPC; remove it manually from AutoHook's AutoGig presets.");
+                    }
+                    else
+                    {
+                        AutoHook.SetPreset?.Invoke(_currentAutoHookPresetName);
                         AutoHook.DeleteSelectedPreset?.Invoke();
-                        GatherBuddy.Log.Debug($"[AutoGather] Deleted GBR-generated preset '{_currentAutoHookTargetPresetName}'");
+                        GatherBuddy.Log.Debug($"[AutoGather] Deleted GBR-generated preset '{_currentAutoHookPresetName}'");
+
+                        if (_currentAutoHookTargetPresetName != null)
+                        {
+                            AutoHook.SetPreset?.Invoke(_currentAutoHookTargetPresetName);
+                            AutoHook.DeleteSelectedPreset?.Invoke();
+                            GatherBuddy.Log.Debug($"[AutoGather] Deleted GBR-generated preset '{_currentAutoHookTargetPresetName}'");
+                        }
                     }
                 }
             }
@@ -297,12 +304,6 @@ public partial class AutoGather
             AutoHook.SetAutoStartFishing?.Invoke(false);
             AutoHook.SetAutoGigState?.Invoke(false);
             GatherBuddy.Log.Debug("[AutoGather] AutoHook/AutoGig disabled");
-            
-            if (_currentAutoHookTarget.HasValue && _currentAutoHookTarget.Value.Fish?.IsSpearFish == true)
-            {
-                GatherBuddy.Log.Debug("[AutoGather] Calling UpdateSpearfishingCatches from CleanupAutoHook");
-                UpdateSpearfishingCatches();
-            }
             
             _currentAutoHookTarget = null;
             _currentAutoHookPresetName = null;

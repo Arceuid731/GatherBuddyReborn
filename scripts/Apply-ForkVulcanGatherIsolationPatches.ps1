@@ -18,9 +18,9 @@ $extensionsPath = Join-Path $PSScriptRoot '..\GatherBuddy\AutoGather\Extensions\
 $extensions = Get-Content -LiteralPath $extensionsPath -Raw
 if ($extensions -notmatch 'VULCAN BAG-ONLY TARGET') {
     $extensions = Replace-Required $extensions @'
-    public static int GetTotalCount(this IGatherable gatherable)
+    public static int GetTotalCount(this IGatherable gatherable, bool useRetainerInventory)
     {
-        if (GatherBuddy.Config.AutoGatherConfig.CheckRetainers && AllaganTools.Enabled)
+        if (useRetainerInventory && GatherBuddy.Config.AutoGatherConfig.CheckRetainers && AllaganTools.Enabled)
         {
             return (int)AllaganTools.ItemCountOwned(gatherable.ItemId, true, _inventoryTypesArray);
         }
@@ -28,7 +28,7 @@ if ($extensions -notmatch 'VULCAN BAG-ONLY TARGET') {
         return gatherable.GetInventoryCount();
     }
 '@ @'
-    public static int GetTotalCount(this IGatherable gatherable)
+    public static int GetTotalCount(this IGatherable gatherable, bool useRetainerInventory)
     {
         // VULCAN BAG-ONLY TARGET: retainer acquisition is a separate Vulcan stage.
         var vulcanList = global::GatherBuddy.Crafting.CraftingGatherBridge.GetTemporaryGatherList();
@@ -36,7 +36,7 @@ if ($extensions -notmatch 'VULCAN BAG-ONLY TARGET') {
          && vulcanList.Items.Any(item => item.ItemId == gatherable.ItemId))
             return gatherable.GetInventoryCount();
 
-        if (GatherBuddy.Config.AutoGatherConfig.CheckRetainers && AllaganTools.Enabled)
+        if (useRetainerInventory && GatherBuddy.Config.AutoGatherConfig.CheckRetainers && AllaganTools.Enabled)
             return (int)AllaganTools.ItemCountOwned(gatherable.ItemId, true, _inventoryTypesArray);
 
         return gatherable.GetInventoryCount();

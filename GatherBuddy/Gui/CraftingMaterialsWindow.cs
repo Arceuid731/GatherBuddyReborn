@@ -407,7 +407,9 @@ public class CraftingMaterialsWindow : Window
     private static IReadOnlyList<CurrencyOption> ResolveCurrencyOptions(uint itemId)
     {
         Dictionary<uint, CurrencyOption>? options = null;
-        foreach (var entry in VendorShopResolver.SpecialShopEntries)
+        foreach (var entry in VendorShopResolver.GilShopEntries
+                     .Concat(VendorShopResolver.SpecialShopEntries)
+                     .Concat(VendorShopResolver.GcShopEntries.Where(VendorShopResolver.MatchesCurrentGrandCompany)))
         {
             if (entry.ItemId != itemId || entry.Cost == 0 || entry.CurrencyItemId == 0)
                 continue;

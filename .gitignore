@@ -4,3 +4,6 @@ obj/
 .idea/
 SecretKeys.generated.cs
 .vscode/
+
+artifacts/
+checkup-build.log

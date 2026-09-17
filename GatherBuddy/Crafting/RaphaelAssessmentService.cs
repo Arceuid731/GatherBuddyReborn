@@ -193,7 +193,11 @@ public static class RaphaelAssessmentService
             return true;
         }
 
-        if (!CraftingContextResolver.TryResolveListExecutionContext(list, recipeId, isOriginalRecipe, settings, out var executionContext))
+        CraftingExecutionContext executionContext;
+        var hasExecutionContext = settings == null
+            ? CraftingContextResolver.TryResolveListExecutionContext(list, recipeId, isOriginalRecipe, out executionContext)
+            : CraftingContextResolver.TryResolveListExecutionContext(list, recipeId, isOriginalRecipe, settings, out executionContext);
+        if (!hasExecutionContext)
         {
             assessment = CreateUnavailableAssessment(recipeId, null, "List crafting settings could not be resolved.");
             return false;

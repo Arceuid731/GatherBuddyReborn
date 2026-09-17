@@ -41,7 +41,7 @@ jobs:
         shell: pwsh
         run: |
           $source = Get-Content ./GatherBuddy/Crafting/RetainerTaskExecutor.cs -Raw
-          if ($source -notmatch 'Retainer greeting visible, dismissing') {
+          if ($source -notmatch 'Retainer greeting visible, dismissing|Dismissing Talk dialog before retainer menu') {
             throw 'Retainer greeting fix is missing after patch step.'
           }
           if ($source -notmatch '_useLiveRetainerScan' -or $source -notmatch 'BuildLiveItemListForCurrentRetainer') {
@@ -195,6 +195,9 @@ jobs:
       - name: Restore NuGet packages
         run: dotnet restore GatherBuddy/GatherBuddy.csproj
 
+      - name: Test inventory isolation
+        run: dotnet run --project tests/ForkInventory.Tests -c Release
+
       - name: Build plugin
         run: >-
           dotnet build --no-restore -c Release GatherBuddy/GatherBuddy.csproj
@@ -219,16 +222,22 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $manifest = Get-Content .\build\GatherBuddyReborn.json -Raw | ConvertFrom-Json
+          if ($manifest.InternalName -ne 'GatherBuddyReborn' -or $manifest.AssemblyVersion -ne $env:PLUGIN_VERSION) {
+            throw 'Built plugin identity or version does not match the release.'
+          }
+          $manifest.RepoUrl = 'https://github.com/Arceuid731/GatherBuddyReborn'
+          $manifest | ConvertTo-Json -Depth 20 | Set-Content .\build\GatherBuddyReborn.json -Encoding utf8
           Compress-Archive -Path .\build\* -DestinationPath .\dist\GatherBuddyReborn.zip -Force
 
-          $manifest = Get-Content .\GatherBuddy\GatherBuddyReborn.json -Raw | ConvertFrom-Json
+          # Publish metadata from the same manifest shipped in the archive.
           $manifest.RepoUrl = 'https://github.com/Arceuid731/GatherBuddyReborn'
           $manifest | Add-Member -NotePropertyName AssemblyVersion -NotePropertyValue $env:PLUGIN_VERSION -Force
           $manifest | Add-Member -NotePropertyName TestingAssemblyVersion -NotePropertyValue $env:PLUGIN_VERSION -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Vulcan zoning crash fix: Crafting Status now reads AutoGather state passively and never refreshes the scheduler/teleport-cost cache from the UI during territory transitions. Includes safe crafting return, ordered live gathering status, mob/vendor Go travel, bag-only Vulcan gathering, bulletproof retainer-stage ownership, bounded recovery, Recent activity, and retainer greeting auto-dismiss.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Updated fishing windows and legendary fish data; improved spearfishing, AutoHook presets, gearset switching, quick synthesis, vendors and Raphael validation. Preserved Enhanced material planning, bag-only Vulcan gathering, retainer recovery and safe crafting return.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8

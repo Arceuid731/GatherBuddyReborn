@@ -65,6 +65,8 @@ public partial class VulcanWindow
     private bool                                         _vendorFilterDirty    = true;
     private List<VendorDisplayRow>                       _vendorDisplay        = new();
     private bool                                         _vendorDisplayBuiltWithResolvedLocations;
+    private int                                          _vendorDisplayShopRevision = -1;
+    private int                                          _vendorDisplayLocationRevision = -1;
     private Dictionary<VendorCurrencyGroup, int>?        _vendorGroupCounts;
     private Dictionary<VendorGilFilter, int>?            _vendorGilCounts;
     private readonly Dictionary<VendorGilFilter, ushort> _vendorGilFilterIconIds = new();
@@ -238,6 +240,7 @@ public partial class VulcanWindow
 
     private void DrawVendorsTabContent()
     {
+        InvalidateVendorDisplayForCacheRevisions();
         var avail = ImGui.GetContentRegionAvail();
         var leftW = VulcanUiScaling.Scaled(220f);
 
@@ -1023,6 +1026,8 @@ public partial class VulcanWindow
             ImGui.SetNextItemWidth(GetVendorQuantityInputWidth());
             ImGui.InputText($"##vendorQty_{row.IdSuffix}", ref _vendorEditingQuantityText, 16,
                 ImGuiInputTextFlags.CharsDecimal | ImGuiInputTextFlags.AutoSelectAll | ImGuiInputTextFlags.EnterReturnsTrue);
+            if (int.TryParse(_vendorEditingQuantityText, out var editedQuantity))
+                SetVendorPurchaseQuantity(row.Entry, editedQuantity);
             if (ImGui.IsItemDeactivated())
                 CommitVendorQuantityEdit(row.Entry);
             return;
@@ -1207,5 +1212,20 @@ public partial class VulcanWindow
          && !_vendorDisplay.Any(row => VendorQuantityKey(row.Entry) == _vendorEditingQuantityKey.Value))
             StopEditingVendorQuantity();
         _vendorDisplayBuiltWithResolvedLocations = locationCacheReady;
+        _vendorDisplayShopRevision = VendorShopResolver.Revision;
+        _vendorDisplayLocationRevision = VendorNpcLocationCache.Revision;
+    }
+
+    private void InvalidateVendorDisplayForCacheRevisions()
+    {
+        if (_vendorDisplayShopRevision != VendorShopResolver.Revision)
+        {
+            _vendorGroupCounts = null;
+            _vendorGilCounts = null;
+            _vendorFilterDirty = true;
+        }
+
+        if (_vendorDisplayLocationRevision != VendorNpcLocationCache.Revision)
+            _vendorFilterDirty = true;
     }
 }

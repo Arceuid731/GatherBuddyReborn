@@ -39,6 +39,7 @@ namespace GatherBuddy.AutoGather
 
         private unsafe void EnqueueMountUp()
         {
+            const uint MountRouletteGeneralActionId = 9;
             var am = ActionManager.Instance();
             var mount = GatherBuddy.Config.AutoGatherConfig.AutoGatherMountId;
             Action doMount;
@@ -49,12 +50,12 @@ namespace GatherBuddy.AutoGather
             }
             else
             {
-                if (am->GetActionStatus(ActionType.GeneralAction, 24) != 0)
+                if (am->GetActionStatus(ActionType.GeneralAction, MountRouletteGeneralActionId) != 0)
                 {
                     return;
                 }
 
-                doMount = () => am->UseAction(ActionType.GeneralAction, 24);
+                doMount = () => am->UseAction(ActionType.GeneralAction, MountRouletteGeneralActionId);
             }
 
             EnqueueActionWithDelay(doMount);
@@ -159,7 +160,7 @@ namespace GatherBuddy.AutoGather
             TaskManager.Enqueue(() => { if (Dalamud.Conditions[ConditionFlag.Mounted]) _advancedUnstuck.Force(); });
         }
 
-        private void MoveToCloseSpearfishingNode(IGameObject gameObject, Classes.Fish targetFish)
+        private void MoveToCloseSpearfishingNode(IGameObject gameObject, Classes.Fish targetFish, FishingSpot expectedSpot)
         {
             var hSeparation = Vector2.Distance(gameObject.Position.ToVector2(), Player.Position.ToVector2());
             var vSeparation = Math.Abs(gameObject.Position.Y - Player.Position.Y);
@@ -174,7 +175,7 @@ namespace GatherBuddy.AutoGather
                     }
                     else
                     {
-                        EnqueueSpearfishingNodeInteraction(gameObject, targetFish);
+                        EnqueueSpearfishingNodeInteraction(gameObject, targetFish, expectedSpot);
                     }
                 }
 

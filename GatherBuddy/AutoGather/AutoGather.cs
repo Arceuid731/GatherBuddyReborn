@@ -13,6 +13,7 @@ using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using GatherBuddy.AutoGather.Extensions;
 using GatherBuddy.AutoGather.Helpers;
@@ -20,6 +21,7 @@ using GatherBuddy.AutoGather.Lists;
 using GatherBuddy.AutoGather.Movement;
 using GatherBuddy.Automation;
 using GatherBuddy.Classes;
+using GatherBuddy.Crafting;
 using GatherBuddy.CustomInfo;
 using GatherBuddy.Data;
 using GatherBuddy.Enums;
@@ -254,8 +256,6 @@ namespace GatherBuddy.AutoGather
                     // Restore normal controller blocking (blocks everything)
                     GatherBuddy.ControllerSupport?.SetBlockingMode(true, true, true);
 
-                    ClearSpearfishingSessionData();
-                    
                     if (_autoRetainerMultiModeEnabled && AutoRetainer.IsEnabled)
                     {
                         try
@@ -580,8 +580,6 @@ namespace GatherBuddy.AutoGather
                     if (isSpearfishing && fish.Fish != null)
                     {
                         _wasGatheringSpearfish = true;
-                        _wasAtShadowNode = _currentGatherTarget?.FishingSpot?.IsShadowNode == true;
-                        
                         var currentFishId = fish.Fish.ItemId;
                         var targetFishId = _currentAutoHookTarget?.Fish?.ItemId ?? 0;
                         var now = DateTime.Now;
@@ -665,23 +663,8 @@ namespace GatherBuddy.AutoGather
 
             if (_wasGatheringSpearfish)
             {
-                GatherBuddy.Log.Debug("[AutoGather] Finished spearfishing, updating catches");
+                GatherBuddy.Log.Debug("[AutoGather] Finished spearfishing, refreshing targets");
                 _wasGatheringSpearfish = false;
-                GatherBuddy.Log.Debug($"[AutoGather] Was at shadow node: {_wasAtShadowNode}");
-                
-                // If we just finished at a shadow node, clear session data FIRST to allow respawn
-                if (_wasAtShadowNode)
-                {
-                    GatherBuddy.Log.Information("[AutoGather] Finished fishing at shadow node, clearing session data to allow respawn");
-                    ClearSpearfishingSessionData();
-                    _wasAtShadowNode = false;
-                }
-                else
-                {
-                    // Only update catches if we weren't at a shadow node
-                    UpdateSpearfishingCatches();
-                }
-                
                 _activeItemList.ForceRefresh();
             }
             
@@ -1887,15 +1870,22 @@ namespace GatherBuddy.AutoGather
                 .Where(v => !IsBlacklisted(v.Position))
                 .ToList();
 
-            var visibleNodes = Dalamud.Objects
-                .Where(o => allPositions.Contains((o.BaseId, o.Position)))
-                .ToList();
+            var isSpearfishing = next.Fish?.IsSpearFish == true;
+            var visibleNodes = isSpearfishing && next.FishingSpot is { } spearfishingSpot
+                ? Dalamud.Objects
+                    .Where(gameObject => TryGetSpearfishingNodeState(gameObject, out var state)
+                        && state.RemainingCount > 0
+                        && MatchesSpearfishingSpot(spearfishingSpot, state)
+                        && !IsVisitedSpearfishingNode(state))
+                    .ToList()
+                : Dalamud.Objects
+                    .Where(gameObject => allPositions.Contains((gameObject.BaseId, gameObject.Position)))
+                    .ToList();
 
             var closestTargetableNode = visibleNodes
                 .Where(o => o.IsTargetable)
                 .MinBy(o => Vector3.Distance(Player.Position, o.Position));
 
-            var isSpearfishing = next.Fish?.IsSpearFish == true;
             if (!isSpearfishing)
             {
                 var isTimedNode = next.Gatherable?.NodeType is NodeType.Unspoiled or NodeType.Legendary or NodeType.Clouded;
@@ -1913,8 +1903,36 @@ namespace GatherBuddy.AutoGather
                 }
                 else if (next.Fish != null)
                 {
-                    MoveToCloseSpearfishingNode(closestTargetableNode, next.Fish);
+                    MoveToCloseSpearfishingNode(closestTargetableNode, next.Fish, next.FishingSpot!);
                 }
+                return;
+            }
+
+            if (isSpearfishing && visibleNodes.MinBy(gameObject => Vector3.Distance(Player.Position, gameObject.Position)) is { } visibleSpearfishingNode)
+            {
+                AutoStatus = visibleSpearfishingNode.IsTargetable ? "Moving to node..." : "Waiting for node to become targetable...";
+                MoveToCloseSpearfishingNode(visibleSpearfishingNode, next.Fish!, next.FishingSpot!);
+                return;
+            }
+
+            if (isSpearfishing && next.FishingSpot is { IsShadowNode: true } shadowSpot)
+            {
+                if (TryGetSwimmingShadowsMarker(shadowSpot, out var shadowMarker))
+                {
+                    AutoStatus = "Moving to Swimming Shadows...";
+                    if (CurrentDestination != default
+                     && IsPathing
+                     && Vector2.DistanceSquared(CurrentDestination.ToVector2(), shadowMarker.ToVector2()) <= 10 * 10)
+                        return;
+
+                    var destination = VNavmesh.Query.Mesh.NearestPoint(shadowMarker, 10, 10000).GetValueOrDefault(shadowMarker);
+                    Navigate(destination, ShouldFly(destination));
+                    return;
+                }
+
+                StopNavigation();
+                _activeItemList.ForceRefresh();
+                AutoStatus = "Refreshing Swimming Shadows state...";
                 return;
             }
 
@@ -2207,18 +2225,32 @@ namespace GatherBuddy.AutoGather
             return true;
         }
 
-        private bool ChangeGearSet(GatheringType job, int delay)
+        private unsafe bool ChangeGearSet(GatheringType job, int delay)
         {
-            var set = job switch
+            var (preferredName, classJobId) = job switch
             {
-                GatheringType.Miner => GatherBuddy.Config.MinerSetName,
-                GatheringType.Botanist => GatherBuddy.Config.BotanistSetName,
-                GatheringType.Fisher => GatherBuddy.Config.FisherSetName,
-                _ => null,
+                GatheringType.Miner    => (GatherBuddy.Config.MinerSetName, 16u),
+                GatheringType.Botanist => (GatherBuddy.Config.BotanistSetName, 17u),
+                GatheringType.Fisher   => (GatherBuddy.Config.FisherSetName, 18u),
+                _                      => (null, 0u),
             };
-            if (string.IsNullOrEmpty(set))
+            if (classJobId == 0)
             {
-                Communicator.PrintError($"No gear set for {job} configured.");
+                Communicator.PrintError($"No job type associated with {job}.");
+                return false;
+            }
+
+            var gearsetModule = RaptureGearsetModule.Instance();
+            if (gearsetModule == null)
+            {
+                Communicator.PrintError("Could not read saved gear sets.");
+                return false;
+            }
+
+            if (!GearsetStatsReader.TryResolveExistingGearsetIndex(gearsetModule, classJobId, preferredName, out var gearsetIndex,
+                    out var gearsetName))
+            {
+                Communicator.PrintError($"No saved gear set for {job} found.");
                 return false;
             }
 
@@ -2242,7 +2274,8 @@ namespace GatherBuddy.AutoGather
             }
 
             _diademPathIndex = -1; // Reset The Diadem path after changing job
-            Chat.ExecuteCommand($"/gearset change \"{set}\"");
+            GatherBuddy.Log.Information($"[AutoGather] Switching to {job} with gearset {gearsetIndex} ({gearsetName}).");
+            gearsetModule->EquipGearset(gearsetIndex);
             TaskManager.DelayNext(Random.Shared.Next(delay, delay + 500)); // Add a random delay to be less suspicious
             return true;
         }
