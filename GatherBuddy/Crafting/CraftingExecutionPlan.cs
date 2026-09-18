@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using GatherBuddy.Plugin;
 
@@ -70,6 +70,21 @@ public sealed class CraftingExecutionPlan
 
     public void RefreshFromCurrentInventory()
         => ApplyResolvedPlan(_planningSnapshot.CreatePlan(false));
+
+    public void RefreshRemainingFromCurrentInventory(int queueIndex)
+    {
+        // Expanded entries each represent one craft. Keep only unfinished final
+        // requests, preserving their settings and quality requirements.
+        var remaining = Queue.Skip(queueIndex).Where(item => item.IsOriginalRecipe && !item.Options.Skipping)
+            .GroupBy(item => item.RecipeId).ToDictionary(group => group.Key, group => group.Count());
+        _planningSnapshot.Recipes.RemoveAll(item => !remaining.ContainsKey(item.RecipeId));
+        foreach (var item in _planningSnapshot.Recipes)
+            item.Quantity = remaining[item.RecipeId];
+        _planningSnapshot.SkipIfEnough = true;
+        // Completed final items must not satisfy unfinished requests a second time.
+        _planningSnapshot.SkipFinalIfEnough = false;
+        RefreshFromCurrentInventory();
+    }
 
     public Dictionary<uint, IngredientQualityDemand> BuildQualityTargetsForItems(IReadOnlyDictionary<uint, int> requestedItems)
     {

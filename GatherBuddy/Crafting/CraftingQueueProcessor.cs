@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Dalamud.Game.ClientState.Conditions;
@@ -54,6 +54,8 @@ public class CraftingQueueProcessor
     private uint _jobSwitchRequestedFor = 0u;
     private Dictionary<uint, int> _missingIngredientFailures = new();
     private string _pauseReason = string.Empty;
+    private bool _craftBlocked;
+    private RaphaelSolveRequest? _blockedRaphaelRequest;
 
     private List<CraftingListItem> QueueItems => _executionPlan?.Queue ?? EmptyQueue;
     private Dictionary<uint, int> MaterialTargets => _executionPlan?.Materials ?? EmptyCounts;
@@ -98,6 +100,8 @@ public class CraftingQueueProcessor
         _jobSwitchRequestedFor = 0u;
         _missingIngredientFailures.Clear();
         _pauseReason = string.Empty;
+        _craftBlocked = false;
+        _blockedRaphaelRequest = null;
         _retainerRestock = executionPlan.RetainerRestock;
         _retainerExecutor = null;
         _retainerBellNavigator = null;
@@ -276,6 +280,19 @@ public class CraftingQueueProcessor
         }
 
         var requiredJob = (uint)(recipe.Value.CraftType.RowId + 8);
+        var jobRow = Dalamud.GameData.GetExcelSheet<ClassJob>().GetRow(requiredJob);
+        var playerState = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
+        if (playerState != null && jobRow.ExpArrayIndex >= 0 && playerState->ClassJobLevels[jobRow.ExpArrayIndex] == 0)
+        {
+            var jobName = jobRow.Name.ExtractText();
+            var itemName = recipe.Value.ItemResult.Value.Name.ExtractText();
+            _craftBlocked = true;
+            Pause(GatherBuddy.Language == global::Dalamud.Game.ClientLanguage.French
+                ? $"Fabrication bloquée : {itemName}. Débloquez le métier {jobName}, puis cliquez sur Reprendre."
+                : $"Crafting blocked: {itemName}. Unlock {jobName}, then press Resume.");
+            return;
+        }
+
         var currentJob = Dalamud.Objects.LocalPlayer?.ClassJob.RowId ?? 0;
 
         if (currentJob != requiredJob)
@@ -415,7 +432,7 @@ public class CraftingQueueProcessor
         }
         else if (IsRaphaelSolutionFailed(recipeItem))
         {
-            SkipFailedRaphaelItem(recipeItem);
+            PauseFailedRaphaelItem(recipeItem);
         }
         else
         {
@@ -444,7 +461,7 @@ public class CraftingQueueProcessor
         }
         else if (IsRaphaelSolutionFailed(recipeItem))
         {
-            SkipFailedRaphaelItem(recipeItem);
+            PauseFailedRaphaelItem(recipeItem);
         }
         else
         {
@@ -504,7 +521,7 @@ public class CraftingQueueProcessor
 
         if (_raphaelCoordinator.HasFailedSolution(currentRequest, out _))
         {
-            SkipFailedRaphaelItem(recipeItem);
+            PauseFailedRaphaelItem(recipeItem);
             return false;
         }
         _raphaelCoordinator.ReenqueueIfMissing(currentRequest);
@@ -630,6 +647,14 @@ public class CraftingQueueProcessor
             GatherBuddy.Log.Information($"[CraftingQueueProcessor] Using macro: {selectedMacroId}");
         }
         var effectiveSolverMode = executionContext.EffectiveSolverMode;
+        var playerStats = CraftingStateBuilder.GetCurrentPlayerStats();
+        if (playerStats.Craftsmanship < recipe.Value.RequiredCraftsmanship ||
+            playerStats.Control < recipe.Value.RequiredControl)
+        {
+            PauseForCraftBlocker(recipeItem, false);
+            return;
+        }
+
         if (!EnsureRaphaelSolutionReadyForCurrentCraft(recipeItem, recipe.Value, executionContext))
             return;
         CraftingGameInterop.ReloadSolversForCraft(effectiveSolverMode, !forceProgressOnlyUnlockCraft);
@@ -810,30 +835,37 @@ public class CraftingQueueProcessor
     }
 
 
-    private void SkipFailedRaphaelItem(CraftingListItem recipeItem)
+    private void PauseFailedRaphaelItem(CraftingListItem recipeItem)
     {
-        var recipeId = recipeItem.RecipeId;
-        var recipe = RecipeManager.GetRecipe(recipeId);
-        var itemName = recipe != null ? recipe.Value.ItemResult.Value.Name.ExtractText() : $"Recipe {recipeId}";
+        var request = BuildRaphaelRequestForItem(recipeItem);
+        string? failureReason = null;
+        if (request != null)
+            _raphaelCoordinator?.HasFailedSolution(request, out failureReason);
+        GatherBuddy.Log.Warning($"[CraftingQueueProcessor] Recipe {recipeItem.RecipeId} blocked by Raphael: {failureReason}");
+        _blockedRaphaelRequest = request;
+        PauseForCraftBlocker(recipeItem, true);
+    }
 
-        string failureReason = "unknown";
-        if (_raphaelCoordinator != null)
+    private void PauseForCraftBlocker(CraftingListItem item, bool solverFailed)
+    {
+        var recipe = RecipeManager.GetRecipe(item.RecipeId);
+        if (recipe == null)
         {
-            var request = BuildRaphaelRequestForItem(recipeItem);
-            if (request != null)
-                _raphaelCoordinator.HasFailedSolution(request, out failureReason);
+            _craftBlocked = true;
+            Pause($"Recipe {item.RecipeId} is unavailable. Stop the queue and check the crafting list.");
+            return;
         }
-
-        GatherBuddy.Log.Warning($"[CraftingQueueProcessor] Skipping '{itemName}' (recipe {recipeId}) - Raphael solution failed: {failureReason ?? "unknown"}");
-        _currentQueueIndex++;
-
-        if (_currentQueueIndex >= QueueItems.Count)
-            CompleteQueue();
-        else
-        {
-            _currentState = QueueState.WaitingForJobSwitch;
-            StateChanged?.Invoke(_currentState);
-        }
+        var jobId = recipe.Value.CraftType.RowId + 8;
+        var job = Dalamud.GameData.GetExcelSheet<ClassJob>().GetRow(jobId).Name.ExtractText();
+        var stats = CraftingStateBuilder.GetCurrentPlayerStats();
+        var reason = CraftBlockerMessage.Build(
+            GatherBuddy.Language == global::Dalamud.Game.ClientLanguage.French,
+            recipe.Value.ItemResult.Value.Name.ExtractText(), job, stats.Level,
+            recipe.Value.RecipeLevelTable.Value.ClassJobLevel, stats.Craftsmanship, stats.Control, stats.CP,
+            recipe.Value.RequiredCraftsmanship, recipe.Value.RequiredControl, !item.IsOriginalRecipe, solverFailed);
+        _craftBlocked = true;
+        GatherBuddy.Log.Warning($"[CraftingQueueProcessor] {reason}");
+        Pause(reason);
     }
 
     private RaphaelSolveRequest? BuildRaphaelRequestForItem(CraftingListItem recipeItem)
@@ -1426,6 +1458,32 @@ public class CraftingQueueProcessor
         if (!_paused)
             return;
 
+        if (_craftBlocked)
+        {
+            // Only an explicit Resume invalidates the failed attempt. No automatic
+            // retry loop, and no successful solutions are discarded.
+            if (_blockedRaphaelRequest != null)
+            {
+                _raphaelCoordinator?.RemoveCachedSolution(_blockedRaphaelRequest);
+                _enqueuedRaphaelRequests.Remove(_blockedRaphaelRequest.GetKey());
+            }
+            _executionPlan?.RefreshRemainingFromCurrentInventory(_currentQueueIndex);
+            _currentQueueIndex = 0;
+            _currentProcessedRecipeId = 0;
+            _currentProcessedRecipeCount = 0;
+            _currentProcessedRecipeTotal = 0;
+            _jobSwitchRequestedFor = 0;
+            _craftBlocked = false;
+            _blockedRaphaelRequest = null;
+            _paused = false;
+            _pauseReason = string.Empty;
+            YesAlready.Lock();
+            _currentState = QueueState.WaitingForGather;
+            StateChanged?.Invoke(_currentState);
+            CraftingGatherBridge.CreateGatherListForMissingIngredients(MaterialTargets);
+            return;
+        }
+
         GatherBuddy.Log.Information("[CraftingQueueProcessor] Resuming queue");
         _paused = false;
         _pauseReason = string.Empty;
@@ -1510,6 +1568,8 @@ public class CraftingQueueProcessor
     {
         YesAlready.Unlock();
         _executionPlan = null;
+        _craftBlocked = false;
+        _blockedRaphaelRequest = null;
         _currentQueueIndex = 0;
         _currentState = QueueState.Idle;
         _pauseReason = string.Empty;

@@ -36,6 +36,7 @@ jobs:
           ./scripts/Apply-ForkManualSourceTravelPatches.ps1
           ./scripts/Apply-ForkVulcanGatherIsolationPatches.ps1
           ./scripts/Apply-ForkZoningCrashGuard.ps1
+          ./scripts/Apply-ForkCraftBlockerPatches.ps1
           ./scripts/Verify-UpstreamFixes.ps1
 
       - name: Verify retainer fixes
@@ -196,6 +197,10 @@ jobs:
       - name: Test inventory isolation
         run: dotnet run --project tests/ForkInventory.Tests -c Release
 
+      - name: Test crafting blockers
+        shell: pwsh
+        run: ./tests/ForkCraftBlockers.Tests/Run.ps1
+
       - name: Build plugin
         run: >-
           dotnet build --no-restore -c Release GatherBuddy/GatherBuddy.csproj
@@ -235,7 +240,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Removed obsolete fork patches now supplied upstream. Added checks against duplicate retainer greeting handlers; preserved Enhanced material planning and inventory isolation.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Crafting now pauses on failed components with job, level and stat details. Resume rechecks manually acquired materials and retries the failed solve without repeating completed final crafts.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8
