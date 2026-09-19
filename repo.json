@@ -1,0 +1,39 @@
+[
+  {
+    "Author": "The Combat Reborn Team",
+    "Name": "GatherBuddy Reborn Enhanced",
+    "InternalName": "GatherBuddyReborn",
+    "Description": "Adds commands to simplify gathering by finding nodes and fish and their locations via item name and a UI to keep track of special uptime and weather conditions. Also automatically gathers items based on these conditions using lists that you specify. Automated gathering requires vnavmesh.",
+    "ApplicableVersion": "any",
+    "RepoUrl": "https://github.com/Arceuid731/GatherBuddyReborn",
+    "Tags": [
+      "Gathering",
+      "Fishing",
+      "Mining",
+      "Botany",
+      "Weather",
+      "Alarms",
+      "Automatic",
+      "Forager"
+    ],
+    "CategoryTags": [
+      "Jobs",
+      "Utility"
+    ],
+    "DalamudApiLevel": 15,
+    "LoadRequiredState": 0,
+    "LoadSync": false,
+    "CanUnloadAsync": false,
+    "LoadPriority": 0,
+    "IconUrl": "https://raw.githubusercontent.com/FFXIV-CombatReborn/RebornAssets/main/IconAssets/GBR_Icon.png",
+    "Punchline": "Simplify Gathering and Fishing to the extreme.",
+    "AcceptsFeedback": true,
+    "AssemblyVersion": "7.5.5.56",
+    "TestingAssemblyVersion": "7.5.5.56",
+    "DownloadLinkInstall": "https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip",
+    "DownloadLinkUpdate": "https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip",
+    "DownloadLinkTesting": "https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip",
+    "Changelog": "Removed a false recipe-lock check that blocked available recipes. Actual recipe-opening errors are recorded from game toasts, with English explanations and client-language item names.",
+    "IsHide": false
+  }
+]
