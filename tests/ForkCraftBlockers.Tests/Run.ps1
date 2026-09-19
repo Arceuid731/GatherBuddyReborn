@@ -25,6 +25,7 @@ $status = Get-Content (Join-Path $PSScriptRoot '../../GatherBuddy/Gui/CraftingSt
 if (-not $status.Contains('for (var i = activity.Count - 1; i >= start; i--)')) { throw 'Recent activity must be newest first after fork patches.' }
 $methods += 'partial class PlanHarness {' + (Get-Method $plan 'public void RefreshRemainingFromCurrentInventory(') + '}'
 $interop = Get-Content (Join-Path $PSScriptRoot '../../GatherBuddy/Crafting/CraftingGameInterop.cs') -Raw
+if ($interop.Contains('IsRecipeUnlocked(')) { throw 'Speculative recipe access check must not return.' }
 $methods += 'partial class SelectionHarness {' + (Get-Method $interop 'private static unsafe bool EnsureExpectedRecipeSelected()').Replace('private static unsafe bool', 'public static unsafe bool') + '}'
 New-Item -ItemType Directory (Join-Path $PSScriptRoot 'obj') -Force | Out-Null
 Set-Content (Join-Path $PSScriptRoot 'obj/QueueMethods.g.cs') $methods -Encoding utf8

@@ -15,6 +15,9 @@ namespace GatherBuddy.Crafting;
 
 public static class CraftingGameInterop
 {
+    private static readonly Dictionary<string, string> RecipeOpenErrors = new(StringComparer.Ordinal);
+    private static uint? _pendingRecipeOpenId;
+    private static DateTime _pendingRecipeOpenAt;
     private static DateTime _recipeMismatchSince = DateTime.MinValue;
     private static DateTime _lastRecipeReopen = DateTime.MinValue;
     private static readonly TimeSpan QuickSynthesisStartTimeout = TimeSpan.FromSeconds(3);
@@ -24,7 +27,7 @@ public static class CraftingGameInterop
 
     public enum CraftPreparationFailureReason
     {
-        RecipeNotUnlocked,
+        RecipeOpenRejected,
         RecipeSelectionMismatch,
         MissingIngredientsUnableToSelect,
         MissingMaterialsUnableToQuickSynth,
@@ -102,6 +105,8 @@ public static class CraftingGameInterop
 
     public static void Initialize()
     {
+        LoadRecipeOpenErrors();
+        Dalamud.ToastGui.ErrorToast += OnRecipeOpenError;
         _currentState = CraftState.IdleNormal;
         ResetQuickSynthesisState();
         _actionExecutor = new CraftingActionExecutor();
@@ -173,6 +178,9 @@ public static class CraftingGameInterop
 
     public static void Dispose()
     {
+        Dalamud.ToastGui.ErrorToast -= OnRecipeOpenError;
+        RecipeOpenErrors.Clear();
+        _pendingRecipeOpenId = null;
         _currentRecipe = null;
         _currentRecipeId = null;
         _currentState = CraftState.IdleNormal;
@@ -263,6 +271,7 @@ public static class CraftingGameInterop
         _lastPreparationFailure = null;
         _recipeMismatchSince = DateTime.MinValue;
         _lastRecipeReopen = DateTime.MinValue;
+        _pendingRecipeOpenId = null;
         GatherBuddy.Log.Debug($"[Crafting] StartCraft - entering PreparingCraft state (QuickSynth={useQuickSynthesis})");
         
         var tm = GatherBuddy.AutoGather?.TaskManager;
@@ -297,7 +306,7 @@ public static class CraftingGameInterop
     {
         try
         {
-            if (RejectLockedRecipe())
+            if (_lastPreparationFailure?.Reason == CraftPreparationFailureReason.RecipeOpenRejected)
                 return null;
             var recipeNote = FFXIVClientStructs.FFXIV.Client.Game.UI.RecipeNote.Instance();
             if (recipeNote != null && recipeNote->RecipeList != null)
@@ -314,7 +323,7 @@ public static class CraftingGameInterop
             if (agent == null)
                 return false;
             
-            agent->OpenRecipeByRecipeId(recipeId);
+            RequestRecipeOpen(recipeId);
             GatherBuddy.Log.Debug($"[Crafting] Opened recipe {recipeId}");
             return true;
         }
@@ -325,32 +334,53 @@ public static class CraftingGameInterop
         }
     }
 
-    private static unsafe bool RejectLockedRecipe()
+    private static void LoadRecipeOpenErrors()
     {
-        if (_lastPreparationFailure?.Reason == CraftPreparationFailureReason.RecipeNotUnlocked)
-            return true;
-        if (!_currentRecipe.HasValue || !_currentRecipeId.HasValue || _currentRecipeId.Value > ushort.MaxValue)
-            return false;
-        var note = FFXIVClientStructs.FFXIV.Client.Game.UI.RecipeNote.Instance();
-        // An uninitialized recipe list is not evidence that a recipe is locked.
-        if (note == null || !note->IsRecipeListReady || note->IsRecipeUnlocked((ushort)_currentRecipeId.Value))
-            return false;
+        RecipeOpenErrors.Clear();
+        var localized = Dalamud.GameData.GetExcelSheet<LogMessage>();
+        var english = Dalamud.GameData.GetExcelSheet<LogMessage>(global::Dalamud.Game.ClientLanguage.English);
+        foreach (var row in english)
+        {
+            var text = row.Text.ExtractText();
+            if (!text.Contains("recipe", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (localized.TryGetRow(row.RowId, out var local))
+            {
+                var localText = local.Text.ExtractText();
+                if (!string.IsNullOrWhiteSpace(localText))
+                    RecipeOpenErrors.TryAdd(localText.Trim(), text);
+            }
+        }
+    }
 
-        var recipe = _currentRecipe.Value;
-        var jobId = recipe.CraftType.RowId + 8;
-        var job = Dalamud.GameData.GetExcelSheet<ClassJob>(global::Dalamud.Game.ClientLanguage.English).GetRow(jobId);
-        var player = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
-        int? level = player != null && job.ExpArrayIndex >= 0 ? player->ClassJobLevels[job.ExpArrayIndex] : null;
-        var item = Dalamud.GameData.GetExcelSheet<Item>(global::Dalamud.Game.ClientLanguage.English).GetRow(recipe.ItemResult.RowId).Name.ExtractText();
-        string? missingQuest = null;
-        if (recipe.Quest.RowId != 0 && !QuestManager.IsQuestComplete(recipe.Quest.RowId))
-            missingQuest = Dalamud.GameData.GetExcelSheet<Quest>(global::Dalamud.Game.ClientLanguage.English).GetRow(recipe.Quest.RowId).Name.ExtractText();
-        var reason = CraftBlockerMessage.BuildAccess(item, job.Name.ExtractText(), level,
-            recipe.RecipeLevelTable.Value.ClassJobLevel, missingQuest);
-        _lastPreparationFailure = new CraftPreparationFailure(_currentRecipeId.Value,
-            CraftPreparationFailureReason.RecipeNotUnlocked, 0, 0, 0, 0, reason);
-        GatherBuddy.Log.Warning($"[Crafting] Recipe {_currentRecipeId.Value} is not unlocked: {reason}");
-        return true;
+    private static unsafe void OnRecipeOpenError(ref global::Dalamud.Game.Text.SeStringHandling.SeString message, ref bool isHandled)
+    {
+        if (!RecipeOpenErrorGuard.ShouldCapture(_pendingRecipeOpenId, _currentRecipeId,
+                DateTime.UtcNow - _pendingRecipeOpenAt, _currentState == CraftState.PreparingCraft,
+                IsExpectedRecipeSelected()))
+            return;
+        var raw = message.TextValue.Trim();
+        if (!RecipeOpenErrors.TryGetValue(raw, out var english))
+        {
+            GatherBuddy.Log.Debug($"[Crafting] Unmapped toast during recipe open: {raw}");
+            return;
+        }
+        var item = _currentRecipe?.ItemResult.Value.Name.ExtractText() ?? $"Recipe {_currentRecipeId}";
+        var reason = CraftBlockerMessage.BuildOpenError(item, english);
+        _lastPreparationFailure = new CraftPreparationFailure(_currentRecipeId!.Value,
+            CraftPreparationFailureReason.RecipeOpenRejected, 0, 0, 0, 0, reason);
+        _pendingRecipeOpenId = null;
+        GatherBuddy.Log.Warning($"[Crafting] Game refused recipe {_currentRecipeId}: {raw}; {reason}");
+        // Preserve the game's toast; recording the reason must not hide it.
+    }
+
+    private static unsafe void RequestRecipeOpen(uint recipeId)
+    {
+        var agent = AgentRecipeNote.Instance();
+        if (agent == null) return;
+        _pendingRecipeOpenId = recipeId;
+        _pendingRecipeOpenAt = DateTime.UtcNow;
+        agent->OpenRecipeByRecipeId(recipeId);
     }
 
     private static unsafe bool? WaitForRecipeOpen()
@@ -382,11 +412,12 @@ public static class CraftingGameInterop
 
     private static unsafe bool EnsureExpectedRecipeSelected()
     {
-        if (RejectLockedRecipe())
+        if (_lastPreparationFailure?.Reason == CraftPreparationFailureReason.RecipeOpenRejected)
             return false;
         if (IsExpectedRecipeSelected())
         {
             _recipeMismatchSince = DateTime.MinValue;
+            _pendingRecipeOpenId = null;
             return true;
         }
         if (!_currentRecipeId.HasValue)
@@ -405,9 +436,7 @@ public static class CraftingGameInterop
         if (now - _lastRecipeReopen >= TimeSpan.FromMilliseconds(500))
         {
             _lastRecipeReopen = now;
-            var agent = AgentRecipeNote.Instance();
-            if (agent != null)
-                agent->OpenRecipeByRecipeId(_currentRecipeId.Value);
+            RequestRecipeOpen(_currentRecipeId.Value);
         }
         return false;
     }

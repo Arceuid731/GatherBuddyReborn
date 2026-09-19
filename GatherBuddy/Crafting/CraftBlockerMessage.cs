@@ -3,17 +3,8 @@ namespace GatherBuddy.Crafting;
 
 public static class CraftBlockerMessage
 {
-    public static string BuildAccess(string item, string job, int? level, int recipeLevel, string? missingQuest)
-    {
-        var reason = $"Recipe unavailable: {item}. You do not yet have access to this recipe. {job}: level {level?.ToString() ?? "unknown"}; recipe level {recipeLevel}.";
-        if (!string.IsNullOrWhiteSpace(missingQuest))
-            reason += $" Complete the required quest: {missingQuest}.";
-        else if (level.HasValue && level.Value < recipeLevel)
-            reason += " Your job level is below the recipe level. Level up and check that the recipe is available in your crafting log.";
-        else
-            reason += " Check the recipe unlock requirements in your crafting log.";
-        return reason + " Unlock it, then press Resume.";
-    }
+    public static string BuildOpenError(string localizedItem, string gameReason)
+        => $"Cannot open {localizedItem}: {gameReason} Resolve this requirement in the game, then press Resume.";
 
     public static string BuildRepair(string job, int condition, int threshold)
         => $"Repair needed — {job}: equipment at {condition}%, threshold {threshold}%. Repair your gear, then press Resume. For automatic repairs, check your repair level, dark matter or access to a mender and sufficient gil.";

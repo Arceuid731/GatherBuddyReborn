@@ -802,7 +802,7 @@ public class CraftingQueueProcessor
         _craftHangSince = DateTime.MinValue;
         var recipe = RecipeManager.GetRecipe(failure.RecipeId);
         var itemName = recipe != null ? recipe.Value.ItemResult.Value.Name.ExtractText() : $"Recipe {failure.RecipeId}";
-        if (failure.Reason == CraftingGameInterop.CraftPreparationFailureReason.RecipeNotUnlocked)
+        if (failure.Reason == CraftingGameInterop.CraftPreparationFailureReason.RecipeOpenRejected)
         {
             _craftBlocked = true;
             _currentState = QueueState.WaitingForJobSwitch;
