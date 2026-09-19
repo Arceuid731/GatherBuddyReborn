@@ -802,6 +802,18 @@ public class CraftingQueueProcessor
         _craftHangSince = DateTime.MinValue;
         var recipe = RecipeManager.GetRecipe(failure.RecipeId);
         var itemName = recipe != null ? recipe.Value.ItemResult.Value.Name.ExtractText() : $"Recipe {failure.RecipeId}";
+        if (failure.Reason == CraftingGameInterop.CraftPreparationFailureReason.RecipeNotUnlocked)
+        {
+            _craftBlocked = true;
+            _currentState = QueueState.WaitingForJobSwitch;
+            var reason = failure.Details;
+            if (!QueueItems[_currentQueueIndex].IsOriginalRecipe)
+                reason += $" You can also obtain this component manually in the required quantity and quality, then press Resume.";
+            Pause(reason);
+            ForkVulcanWorkflowSupport.AddActivity(reason, VulcanActivityKind.Warning);
+            StateChanged?.Invoke(_currentState);
+            return true;
+        }
         if (failure.Reason == CraftingGameInterop.CraftPreparationFailureReason.RecipeSelectionMismatch)
         {
             var reason = $"The crafting log did not load {itemName}. Close the crafting log, then press Resume to try again.";

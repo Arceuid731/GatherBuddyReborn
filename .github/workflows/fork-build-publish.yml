@@ -240,7 +240,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Crafting validates the selected recipe before reading materials or starting synthesis. Incorrect crafting-log selections pause with clear recovery instructions. Blocker messages are in English and show material deficits without internal jargon.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Locked recipes now pause with the actual access refusal before repeated opening attempts. English messages include job and recipe levels and verified quest requirements; Resume rechecks access and manually acquired components.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8

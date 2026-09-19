@@ -71,6 +71,20 @@ SelectionHarness.EnsureExpectedRecipeSelected();
 Check(SelectionHarness._lastPreparationFailure?.Reason == CraftPreparationFailureReason.RecipeSelectionMismatch, "Persistent mismatch produces selection failure, not material shortage");
 SelectionHarness.Ready = true;
 Check(SelectionHarness.EnsureExpectedRecipeSelected() && SelectionHarness._recipeMismatchSince == DateTime.MinValue, "Matching selection ends recovery wait");
+var opensBeforeLock = AgentRecipeNote.Opens;
+SelectionHarness.Ready = false;
+SelectionHarness.Locked = true;
+SelectionHarness._lastPreparationFailure = null;
+Check(!SelectionHarness.EnsureExpectedRecipeSelected() && AgentRecipeNote.Opens == opensBeforeLock, "Locked recipe prevents reopening");
+SelectionHarness._recipeMismatchSince = DateTime.UtcNow.AddSeconds(-5);
+SelectionHarness.EnsureExpectedRecipeSelected();
+Check(SelectionHarness._lastPreparationFailure?.Reason == CraftPreparationFailureReason.RecipeNotUnlocked, "Access refusal is never overwritten by selection timeout");
+var access = CraftBlockerMessage.BuildAccess("Elm Lumber", "Carpenter", 9, 16, null);
+Check(access.Contains("do not yet have access") && access.Contains("Carpenter: level 9") && access.Contains("recipe level 16") && !access.Contains("Close"), "Access blocker states the actual refusal and job context");
+var questAccess = CraftBlockerMessage.BuildAccess("Item", "Job", 100, 50, "Required quest");
+Check(questAccess.Contains("Complete the required quest: Required quest"), "Verified missing quest is named");
+var unknownAccess = CraftBlockerMessage.BuildAccess("Item", "Job", null, 50, null);
+Check(unknownAccess.Contains("unknown") && !unknownAccess.Contains("Level up"), "Unknown job level does not invent a requirement");
 Console.WriteLine($"{passed} crafting blocker regression tests passed.");
 
 record RaphaelSolveRequest(uint RecipeId) { public string GetKey() => RecipeId.ToString(); }
@@ -131,9 +145,11 @@ partial class SelectionHarness {
     public static DateTime _recipeMismatchSince = DateTime.MinValue, _lastRecipeReopen = DateTime.MinValue;
     public static uint? _currentRecipeId = 1037;
     public static CraftPreparationFailure? _lastPreparationFailure;
+    public static bool Locked;
+    static bool RejectLockedRecipe() { if (!Locked) return false; _lastPreparationFailure = new(1037, CraftPreparationFailureReason.RecipeNotUnlocked, 0, 0, 0, 0, "Recipe unavailable"); return true; }
     static bool IsExpectedRecipeSelected() => Ready;
 }
-enum CraftPreparationFailureReason { RecipeSelectionMismatch }
+enum CraftPreparationFailureReason { RecipeNotUnlocked, RecipeSelectionMismatch }
 record CraftPreparationFailure(uint RecipeId, CraftPreparationFailureReason Reason, uint ItemId, int Needed, int NQ, int HQ, string Details);
 unsafe struct AgentRecipeNote {
     static readonly nint Pointer = System.Runtime.InteropServices.Marshal.AllocHGlobal(1);
