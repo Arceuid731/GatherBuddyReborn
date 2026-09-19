@@ -159,6 +159,8 @@ public class CraftingQueueProcessor
         }
 
         ProcessTasks();
+        if (_paused)
+            return;
         
         switch (_currentState)
         {
@@ -228,7 +230,16 @@ public class CraftingQueueProcessor
     {
         while (_tasks.Count > 0)
         {
-            var result = _tasks[0]();
+            var task = _tasks[0];
+            var result = task();
+            // Pause may clear the list. A retainer callback can instead pause
+            // without clearing it: consume that callback once, but stop the frame.
+            if (_paused)
+            {
+                if (result == CraftingTasks.TaskResult.Done && _tasks.Count > 0 && ReferenceEquals(_tasks[0], task))
+                    _tasks.RemoveAt(0);
+                return;
+            }
             switch (result)
             {
                 case CraftingTasks.TaskResult.Done:
@@ -240,10 +251,8 @@ public class CraftingQueueProcessor
                     _tasks.Clear();
                     if (_currentState == QueueState.Repairing)
                     {
-                        GatherBuddy.Log.Warning("[CraftingQueueProcessor] Repair task aborted, recovering to WaitingForJobSwitch");
-                        CraftingTasks.ResetRepairState();
-                        _currentState = QueueState.WaitingForJobSwitch;
-                        StateChanged?.Invoke(_currentState);
+                        GatherBuddy.Log.Warning("[CraftingQueueProcessor] Repair task aborted; pausing the current craft");
+                        PauseForRepair(BuildRepairPauseReason());
                     }
                     return;
             }
@@ -365,9 +374,9 @@ public class CraftingQueueProcessor
         if (NeedsRepair())
         {
             GatherBuddy.Log.Information("[CraftingQueueProcessor] Equipment needs repair before crafting");
-            QueueRepairTasks();
             _currentState = QueueState.Repairing;
             StateChanged?.Invoke(_currentState);
+            QueueRepairTasks();
             return;
         }
 
@@ -1149,8 +1158,8 @@ public class CraftingQueueProcessor
             return;
         }
 
-        GatherBuddy.Log.Error("[CraftingQueueProcessor] Cannot repair: no dark matter and no repair NPC available");
-        _tasks.Add(() => { CompleteQueue(); return CraftingTasks.TaskResult.Abort; });
+        GatherBuddy.Log.Warning("[CraftingQueueProcessor] No usable repair route: check self-repair requirements, NPC availability and gil");
+        PauseForRepair(BuildRepairPauseReason());
     }
 
     private void QueueRetainerBellNavigationTasks()
@@ -1314,8 +1323,32 @@ public class CraftingQueueProcessor
         GatherBuddy.Log.Debug($"[CraftingQueueProcessor] Rebuilt post-retainer queue with {QueueItems.Count} craft(s) and {MaterialTargets.Count} leaf material(s)");
     }
 
+    private string BuildRepairPauseReason()
+    {
+        var job = Dalamud.Objects.LocalPlayer?.ClassJob.Value.Name.ExtractText() ?? "";
+        return CraftBlockerMessage.BuildRepair(
+            GatherBuddy.Language == global::Dalamud.Game.ClientLanguage.French,
+            job, RepairManager.GetMinEquippedPercent(), GatherBuddy.Config.VulcanRepairConfig.RepairThreshold);
+    }
+
+    private void PauseForRepair(string reason)
+    {
+        CraftingTasks.ResetRepairState();
+        // Resume rechecks the current job and equipment, keeping queue progress.
+        _currentState = QueueState.WaitingForJobSwitch;
+        Pause(reason);
+        StateChanged?.Invoke(_currentState);
+        GatherBuddy.Log.Warning($"[CraftingQueueProcessor] {reason}");
+        ForkVulcanWorkflowSupport.AddActivity(reason, VulcanActivityKind.Warning);
+    }
+
     private void TransitionFromRepairComplete()
     {
+        if (NeedsRepair())
+        {
+            PauseForRepair(BuildRepairPauseReason());
+            return;
+        }
         GatherBuddy.Log.Information("[CraftingQueueProcessor] Repair complete, continuing to craft");
         _currentState = QueueState.WaitingForJobSwitch;
         StateChanged?.Invoke(_currentState);

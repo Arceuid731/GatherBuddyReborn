@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 # Compile the real state-transition methods against a minimal game boundary.
 # This exercises queue behavior without requiring a running Dalamud client.
 function Get-Method([string]$source, [string]$signature) {
@@ -18,6 +18,11 @@ function Get-Method([string]$source, [string]$signature) {
 $queue = Get-Content (Join-Path $PSScriptRoot '../../GatherBuddy/Crafting/CraftingQueueProcessor.cs') -Raw
 $plan = Get-Content (Join-Path $PSScriptRoot '../../GatherBuddy/Crafting/CraftingExecutionPlan.cs') -Raw
 $methods = 'partial class QueueHarness {' + (Get-Method $queue 'private void PauseFailedRaphaelItem(') + (Get-Method $queue 'public void Resume()') + '}'
+$methods += 'partial class QueueHarness {' + (Get-Method $queue 'private void ProcessTasks()').Replace('private void ProcessTasks', 'public void ProcessTasks') + (Get-Method $queue 'private void PauseForRepair(').Replace('private void PauseForRepair', 'public void PauseForRepair') + (Get-Method $queue 'private void TransitionFromRepairComplete()').Replace('private void TransitionFromRepairComplete', 'public void TransitionFromRepairComplete') + '}'
+$repair = Get-Method $queue 'private unsafe void QueueRepairTasks()'
+if ($repair.Contains('CompleteQueue()') -or -not $repair.Contains('PauseForRepair(BuildRepairPauseReason())')) { throw 'Unavailable repair must pause, never complete.' }
+$status = Get-Content (Join-Path $PSScriptRoot '../../GatherBuddy/Gui/CraftingStatusWindow.cs') -Raw
+if (-not $status.Contains('for (var i = activity.Count - 1; i >= start; i--)')) { throw 'Recent activity must be newest first after fork patches.' }
 $methods += 'partial class PlanHarness {' + (Get-Method $plan 'public void RefreshRemainingFromCurrentInventory(') + '}'
 New-Item -ItemType Directory (Join-Path $PSScriptRoot 'obj') -Force | Out-Null
 Set-Content (Join-Path $PSScriptRoot 'obj/QueueMethods.g.cs') $methods -Encoding utf8

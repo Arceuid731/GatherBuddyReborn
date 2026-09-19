@@ -29,6 +29,29 @@ var stats = CraftBlockerMessage.Build(false, "Item", "Carpenter", 100, 100, 250,
 Check(stats.Contains("250/300 (missing 50)") && stats.Contains("180/200 (missing 20)"), "Known stat requirements show exact deficits");
 var other = CraftBlockerMessage.Build(true, "Objet", "Alchimiste", 100, 20, 500, 400, 300, 0, 0, false, true);
 Check(!other.Contains("inférieur") && !other.Contains("manuellement"), "Solver failure does not invent a level deficit or a final-item Resume promise");
+var repairQueue = new QueueHarness { _currentState = QueueState.Repairing };
+repairQueue._tasks.Add(() => { repairQueue.TransitionFromRepairComplete(); return CraftingTasks.TaskResult.Done; });
+repairQueue.ProcessTasks();
+Check(repairQueue._paused && repairQueue._currentQueueIndex == 1, "Incomplete repair pauses without losing the current craft");
+Check(repairQueue._tasks.Count == 0 && repairQueue._currentState == QueueState.WaitingForJobSwitch, "Pausing from inside a repair callback safely clears tasks");
+Check(ForkVulcanWorkflowSupport.Events == 1 && repairQueue._pauseReason == "Repair needed", "Repair blocker stays visible and enters activity history");
+repairQueue.Resume();
+Check(!repairQueue._paused && repairQueue._currentQueueIndex == 1 && repairQueue._currentState == QueueState.WaitingForJobSwitch, "Repair Resume preserves progress and rechecks the job");
+repairQueue._currentState = QueueState.Repairing;
+repairQueue._tasks.Add(() => CraftingTasks.TaskResult.Abort);
+repairQueue.ProcessTasks();
+Check(repairQueue._paused && repairQueue._currentQueueIndex == 1, "Aborted repair pauses rather than retrying every frame");
+var repaired = new QueueHarness { RepairNeeded = false, _currentState = QueueState.Repairing };
+repaired._tasks.Add(() => { repaired.TransitionFromRepairComplete(); return CraftingTasks.TaskResult.Done; });
+repaired.ProcessTasks();
+Check(!repaired._paused && repaired._tasks.Count == 0 && repaired._currentState == QueueState.WaitingForJobSwitch, "Successful repair continues normally");
+var retainerPause = new QueueHarness();
+retainerPause._tasks.Add(() => { retainerPause._paused = true; return CraftingTasks.TaskResult.Done; });
+retainerPause._tasks.Add(() => throw new Exception("Must not execute tasks after pause"));
+retainerPause.ProcessTasks();
+Check(retainerPause._tasks.Count == 1, "Pause without clearing consumes its completed callback once and stops processing");
+var repairText = CraftBlockerMessage.BuildRepair(true, "Couturier", 10, 20);
+Check(repairText.Contains("Couturier") && repairText.Contains("10 %") && repairText.Contains("20 %") && repairText.Contains("Reprendre"), "Repair explanation identifies equipped job, condition and next action");
 Console.WriteLine($"{passed} crafting blocker regression tests passed.");
 
 record RaphaelSolveRequest(uint RecipeId) { public string GetKey() => RecipeId.ToString(); }
@@ -40,8 +63,14 @@ partial class PlanHarness {
     public Snapshot _planningSnapshot = new(); public bool Refreshed;
     public void RefreshFromCurrentInventory() => Refreshed = true;
 }
-enum QueueState { WaitingForGather, WaitingForJobSwitch, WaitingForRaphaelSolution, WaitingForManualMaterials, NavigatingToRetainerBell, WithdrawingFromRetainer, Crafting }
+enum QueueState { Repairing, WaitingForGather, WaitingForJobSwitch, WaitingForRaphaelSolution, WaitingForManualMaterials, NavigatingToRetainerBell, WithdrawingFromRetainer, Crafting }
 partial class QueueHarness {
+    public List<Func<CraftingTasks.TaskResult>> _tasks = [];
+    public bool RepairNeeded = true;
+    bool NeedsRepair() => RepairNeeded;
+    string BuildRepairPauseReason() => "Repair needed";
+    void Pause(string reason) { _paused = true; _pauseReason = reason; _tasks.Clear(); }
+
     public bool _paused, _craftBlocked, _pausedDuringGather;
     public int _currentQueueIndex = 1, _currentProcessedRecipeId, _currentProcessedRecipeCount, _currentProcessedRecipeTotal, _jobSwitchRequestedFor;
     public QueueState _currentState = QueueState.WaitingForRaphaelSolution;
@@ -70,3 +99,10 @@ class GatherList { public List<int> Items = []; }
 static class CraftingGatherBridge { public static int Starts; public static void CreateGatherListForMissingIngredients(Dictionary<uint, int> m) => Starts++; public static GatherList? GetTemporaryGatherList() => null; }
 static class CraftingGameInterop { public enum CraftState { IdleNormal } public static CraftState CurrentState = CraftState.IdleNormal; }
 
+
+static class CraftingTasks {
+    public enum TaskResult { Done, Retry, Abort }
+    public static void ResetRepairState() {}
+}
+static class ForkVulcanWorkflowSupport { public static int Events; public static void AddActivity(string reason, VulcanActivityKind kind) => Events++; }
+enum VulcanActivityKind { Warning }

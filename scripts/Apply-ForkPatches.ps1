@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 function Replace-Required {
     param(
@@ -531,7 +531,7 @@ if ($statusContent -notmatch 'DrawRecentActivity\(\)') {
             true);
 
         var start = Math.Max(0, activity.Count - 12);
-        for (var i = start; i < activity.Count; i++)
+        for (var i = activity.Count - 1; i >= start; i--)
         {
             var entry = activity[i];
             var color = entry.Kind switch

@@ -1,4 +1,4 @@
-name: Fork Build & Publish Dalamud Repo
+﻿name: Fork Build & Publish Dalamud Repo
 
 on:
   pull_request:
@@ -240,7 +240,7 @@ jobs:
           $manifest | Add-Member -NotePropertyName DownloadLinkInstall -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkUpdate -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
           $manifest | Add-Member -NotePropertyName DownloadLinkTesting -NotePropertyValue 'https://raw.githubusercontent.com/Arceuid731/GatherBuddyReborn/dist/GatherBuddyReborn.zip' -Force
-          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Crafting now pauses on failed components with job, level and stat details. Resume rechecks manually acquired materials and retries the failed solve without repeating completed final crafts.' -Force
+          $manifest | Add-Member -NotePropertyName Changelog -NotePropertyValue 'Unavailable or incomplete repairs now pause crafting with a visible explanation instead of completing the queue. Resume rechecks equipment while preserving progress. Recent activity shows newest events first.' -Force
           $manifest | Add-Member -NotePropertyName IsHide -NotePropertyValue $false -Force
 
           ConvertTo-Json -InputObject @($manifest) -Depth 20 | Set-Content .\dist\repo.json -Encoding utf8

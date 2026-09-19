@@ -1,9 +1,14 @@
-namespace GatherBuddy.Crafting;
+﻿namespace GatherBuddy.Crafting;
 
 // Keep solver diagnostics out of player-facing messages. A recipe's displayed
 // level is not treated as a hard crafting requirement.
 public static class CraftBlockerMessage
 {
+    public static string BuildRepair(bool french, string job, int condition, int threshold)
+        => french
+            ? $"Réparation nécessaire — {job} : équipement à {condition} %, seuil {threshold} %. Faites réparer votre équipement, puis cliquez sur Reprendre. Pour la réparation automatique, vérifiez le niveau de réparation, la matière sombre ou l’accès à un réparateur et les gils."
+            : $"Repair needed — {job}: equipment at {condition}%, threshold {threshold}%. Repair your gear, then press Resume. For automatic repairs, check your repair level, dark matter or access to a mender and sufficient gil.";
+
     public static string Build(bool french, string item, string job, int level, int recipeLevel,
         int craftsmanship, int control, int cp, int requiredCraftsmanship, int requiredControl,
         bool intermediate, bool noSolution)
