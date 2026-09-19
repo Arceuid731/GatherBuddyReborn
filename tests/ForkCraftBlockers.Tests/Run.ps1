@@ -35,6 +35,6 @@ $gate = $bridge.IndexOf('if (PauseForKnownGatherStop(')
 $retry = $bridge.IndexOf('if (ForkVulcanWorkflowSupport.TryRegisterGatherRecovery(')
 if ($gate -lt 0 -or $retry -lt $gate) { throw 'Known gather failures must pause before recovery.' }
 New-Item -ItemType Directory (Join-Path $PSScriptRoot 'obj') -Force | Out-Null
-Set-Content (Join-Path $PSScriptRoot 'obj/QueueMethods.g.cs') $methods -Encoding utf8
+Set-Content (Join-Path $PSScriptRoot 'obj/QueueMethods.g.cs') $methods.Replace('GatherBuddy.AutoGather.', 'GatherBuddy.AutoGatherStub.') -Encoding utf8
 & dotnet run --project $PSScriptRoot -c Release
 if ($LASTEXITCODE -ne 0) { throw 'Craft blocker regression tests failed.' }

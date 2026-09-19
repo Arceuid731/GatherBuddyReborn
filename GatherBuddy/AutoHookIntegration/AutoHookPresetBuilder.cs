@@ -296,7 +296,7 @@ public class AutoHookPresetBuilder
             if (baitId == 0) continue;
 
             var effectiveBaitId = baitId;
-            if (GetInventoryItemCount(baitId) == 0)
+            if (GetInventoryItemCount(baitId) == 0 && GetInventoryItemCount(VersatileLureId) > 0)
             {
                 GatherBuddy.Log.Warning($"[AutoHook] User does not have bait {baitId} in inventory, using Versatile Lure ({VersatileLureId}) instead");
                 effectiveBaitId = VersatileLureId;
@@ -385,7 +385,7 @@ public class AutoHookPresetBuilder
             if (baitId == 0) continue;
 
             var effectiveBaitId = baitId;
-            if (GetInventoryItemCount(baitId) == 0)
+            if (GetInventoryItemCount(baitId) == 0 && GetInventoryItemCount(VersatileLureId) > 0)
             {
                 GatherBuddy.Log.Warning($"[AutoHook] User does not have bait {baitId} in inventory, using Versatile Lure ({VersatileLureId}) instead");
                 effectiveBaitId = VersatileLureId;
@@ -460,7 +460,7 @@ public class AutoHookPresetBuilder
             if (baitId == 0) continue;
 
             var effectiveBaitId = baitId;
-            if (GetInventoryItemCount(baitId) == 0)
+            if (GetInventoryItemCount(baitId) == 0 && GetInventoryItemCount(VersatileLureId) > 0)
             {
                 GatherBuddy.Log.Warning($"[AutoHook] User does not have bait {baitId} in inventory, using Versatile Lure ({VersatileLureId}) instead");
                 effectiveBaitId = VersatileLureId;

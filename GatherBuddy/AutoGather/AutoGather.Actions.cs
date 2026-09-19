@@ -254,6 +254,8 @@ namespace GatherBuddy.AutoGather
             LureSuccess = false;
 
             SetupAutoHookForFishing(target);
+            if (TryPauseForMissingFishingBait(target))
+                return;
 
             if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
             {

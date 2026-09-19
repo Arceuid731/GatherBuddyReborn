@@ -90,13 +90,24 @@ SelectionHarness._lastPreparationFailure = null;
 SelectionHarness.Ready = true;
 Check(SelectionHarness.EnsureExpectedRecipeSelected(), "Available recipe succeeds without speculative unlock check");
 GatherStopHarness._queueProcessor = new();
-GatherBuddy.AutoGather.LastStopReason = null;
+GatherBuddy.AutoGatherStub.LastStopReason = null;
 Check(!GatherStopHarness.PauseForKnownGatherStop("Rondin d'orme x1") && !GatherStopHarness._queueProcessor.Paused, "Unknown gather stop retains bounded recovery");
-GatherBuddy.AutoGather.LastStopReason = "Your main inventory is full. Free at least one slot";
+GatherBuddy.AutoGatherStub.LastStopReason = "Your main inventory is full. Free at least one slot";
 Check(GatherStopHarness.PauseForKnownGatherStop("Rondin d'orme x1") && GatherStopHarness._queueProcessor.Paused, "Full inventory pauses immediately without another gather attempt");
 Check(GatherStopHarness._queueProcessor.Reason.Contains("Your main inventory is full") && GatherStopHarness._queueProcessor.Reason.Contains("Rondin d'orme x1") && GatherStopHarness._queueProcessor.Reason.Contains("Press Resume"), "Full inventory explains action and preserves client-language material name");
 GatherStopHarness._queueProcessor = null;
 Check(!GatherStopHarness.PauseForKnownGatherStop("Rondin d'orme x1"), "Gather stop outside a crafting queue is harmless");
+var baitConfig = """
+{"HookPresets":{"SelectedGuid":"current","DefaultPreset":{"ExtraCfg":{"Enabled":true,"ForceBaitSwap":true,"ForcedBaitId":300}},"CustomPresets":[{"UniqueId":"other","PresetName":"Other","ExtraCfg":{"Enabled":true,"ForceBaitSwap":true,"ForcedBaitId":999}},{"UniqueId":"current","PresetName":"GBR_Papillon","ExtraCfg":{"Enabled":true,"ForceBaitSwap":true,"ForcedBaitId":2587}}]}}
+""";
+Check(global::GatherBuddy.AutoGather.FishingBaitRequirement.Resolve(baitConfig, "GBR_Papillon", null, false, 29717) == 2587, "Missing bait names the active preset's required bait, not the equipped fallback");
+Check(global::GatherBuddy.AutoGather.FishingBaitRequirement.Resolve(baitConfig, "Different", null, false, 29717) == 0, "Stale or unrelated preset cannot cause a false bait blocker");
+Check(global::GatherBuddy.AutoGather.FishingBaitRequirement.Resolve(baitConfig, "Predators", "GBR_Papillon", false, 29717) == 2587, "Intuition target preset uses its own bait after switching");
+Check(global::GatherBuddy.AutoGather.FishingBaitRequirement.Resolve(baitConfig.Replace("\"ForceBaitSwap\":true", "\"ForceBaitSwap\":false"), "GBR_Papillon", null, false, 29717) == 29717, "No forced swap checks the player's equipped bait");
+Check(global::GatherBuddy.AutoGather.FishingBaitRequirement.Resolve(baitConfig.Replace("\"Enabled\":true", "\"Enabled\":false"), "GBR_Papillon", null, false, 29717) == 29717, "Disabled extra settings do not invent a forced bait requirement");
+Check(global::GatherBuddy.AutoGather.FishingBaitRequirement.Resolve(baitConfig, "GBR_Papillon", null, true, 29717) == 0, "Global mode waits until the global preset is actually selected");
+Check(global::GatherBuddy.AutoGather.FishingBaitRequirement.Resolve(baitConfig.Replace("\"SelectedGuid\":\"current\"", "\"SelectedGuid\":\"\""), null, null, true, 29717) == 300, "Global preset forced bait is respected");
+Check(global::GatherBuddy.AutoGather.FishingBaitRequirement.Resolve("{}", "GBR_Papillon", null, false, 29717) == 0, "Unavailable preset data does not guess a bait requirement");
 Console.WriteLine($"{passed} crafting blocker regression tests passed.");
 
 record RaphaelSolveRequest(uint RecipeId) { public string GetKey() => RecipeId.ToString(); }
@@ -138,7 +149,7 @@ class Coordinator {
     public bool HasFailedSolution(RaphaelSolveRequest r, out string? reason) { reason = "NoSolution"; return true; }
     public void RemoveCachedSolution(RaphaelSolveRequest r) => Removed++;
 }
-namespace GatherBuddy { static class Log { public static void Warning(string s) {} public static void Information(string s) {} public static void Debug(string s) {} } static class AutoGather { public static bool Enabled; public static string? LastStopReason; } }
+namespace GatherBuddy { static class Log { public static void Warning(string s) {} public static void Information(string s) {} public static void Debug(string s) {} } static class AutoGatherStub { public static bool Enabled; public static string? LastStopReason; } }
 static class YesAlready { public static void Lock() {} }
 class GatherList { public List<int> Items = []; }
 static class CraftingGatherBridge { public static int Starts; public static void CreateGatherListForMissingIngredients(Dictionary<uint, int> m) => Starts++; public static GatherList? GetTemporaryGatherList() => null; }

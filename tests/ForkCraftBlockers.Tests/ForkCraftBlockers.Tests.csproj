@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><AllowUnsafeBlocks>true</AllowUnsafeBlocks><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
-  <ItemGroup><Compile Include="../../GatherBuddy/Crafting/RecipeOpenErrorGuard.cs" Link="RecipeOpenErrorGuard.cs" /><Compile Include="../../GatherBuddy/Crafting/RecipeSelectionGuard.cs" Link="RecipeSelectionGuard.cs" /><Compile Include="../../GatherBuddy/Crafting/CraftBlockerMessage.cs" Link="CraftBlockerMessage.cs" /><Compile Include="obj/QueueMethods.g.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../GatherBuddy/AutoGather/FishingBaitRequirement.cs" Link="FishingBaitRequirement.cs" /><Compile Include="../../GatherBuddy/Crafting/RecipeOpenErrorGuard.cs" Link="RecipeOpenErrorGuard.cs" /><Compile Include="../../GatherBuddy/Crafting/RecipeSelectionGuard.cs" Link="RecipeSelectionGuard.cs" /><Compile Include="../../GatherBuddy/Crafting/CraftBlockerMessage.cs" Link="CraftBlockerMessage.cs" /><Compile Include="obj/QueueMethods.g.cs" /></ItemGroup>
 </Project>
