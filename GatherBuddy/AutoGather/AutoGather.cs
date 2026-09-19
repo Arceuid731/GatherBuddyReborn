@@ -214,6 +214,8 @@ namespace GatherBuddy.AutoGather
             }
         } = false;
 
+        public string? LastStopReason { get; private set; }
+
         public unsafe bool Enabled
         {
             get => _enabled;
@@ -285,6 +287,7 @@ namespace GatherBuddy.AutoGather
             }
         else
             {
+                LastStopReason = null;
                 if (!ValidateActiveItemsPerception())
                 {
                     return;
@@ -532,7 +535,7 @@ namespace GatherBuddy.AutoGather
                 }
                 else
                 {
-                    AbortAutoGather("Inventory is full");
+                    AbortAutoGather("Your main inventory is full. Free at least one slot");
                 }
 
                 return;
@@ -2094,6 +2097,8 @@ namespace GatherBuddy.AutoGather
                 }
             }
 
+            LastStopReason = status;
+            GatherBuddy.Log.Information($"[AutoGather] Stopping: {status ?? "No explicit reason supplied"}; free inventory slots={FreeInventorySlots}.");
             if (!string.IsNullOrEmpty(status))
                 AutoStatus = status;
             if (GatherBuddy.Config.AutoGatherConfig.HonkMode)

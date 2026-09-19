@@ -1,4 +1,4 @@
-﻿using GatherBuddy.Crafting;
+using GatherBuddy.Crafting;
 
 var passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception(name); passed++; Console.WriteLine($"PASS {name}"); }
@@ -89,6 +89,14 @@ Check(localizedError.Contains("Madrier d’érable") && localizedError.StartsWit
 SelectionHarness._lastPreparationFailure = null;
 SelectionHarness.Ready = true;
 Check(SelectionHarness.EnsureExpectedRecipeSelected(), "Available recipe succeeds without speculative unlock check");
+GatherStopHarness._queueProcessor = new();
+GatherBuddy.AutoGather.LastStopReason = null;
+Check(!GatherStopHarness.PauseForKnownGatherStop("Rondin d'orme x1") && !GatherStopHarness._queueProcessor.Paused, "Unknown gather stop retains bounded recovery");
+GatherBuddy.AutoGather.LastStopReason = "Your main inventory is full. Free at least one slot";
+Check(GatherStopHarness.PauseForKnownGatherStop("Rondin d'orme x1") && GatherStopHarness._queueProcessor.Paused, "Full inventory pauses immediately without another gather attempt");
+Check(GatherStopHarness._queueProcessor.Reason.Contains("Your main inventory is full") && GatherStopHarness._queueProcessor.Reason.Contains("Rondin d'orme x1") && GatherStopHarness._queueProcessor.Reason.Contains("Press Resume"), "Full inventory explains action and preserves client-language material name");
+GatherStopHarness._queueProcessor = null;
+Check(!GatherStopHarness.PauseForKnownGatherStop("Rondin d'orme x1"), "Gather stop outside a crafting queue is harmless");
 Console.WriteLine($"{passed} crafting blocker regression tests passed.");
 
 record RaphaelSolveRequest(uint RecipeId) { public string GetKey() => RecipeId.ToString(); }
@@ -130,7 +138,7 @@ class Coordinator {
     public bool HasFailedSolution(RaphaelSolveRequest r, out string? reason) { reason = "NoSolution"; return true; }
     public void RemoveCachedSolution(RaphaelSolveRequest r) => Removed++;
 }
-namespace GatherBuddy { static class Log { public static void Warning(string s) {} public static void Information(string s) {} public static void Debug(string s) {} } static class AutoGather { public static bool Enabled; } }
+namespace GatherBuddy { static class Log { public static void Warning(string s) {} public static void Information(string s) {} public static void Debug(string s) {} } static class AutoGather { public static bool Enabled; public static string? LastStopReason; } }
 static class YesAlready { public static void Lock() {} }
 class GatherList { public List<int> Items = []; }
 static class CraftingGatherBridge { public static int Starts; public static void CreateGatherListForMissingIngredients(Dictionary<uint, int> m) => Starts++; public static GatherList? GetTemporaryGatherList() => null; }
@@ -160,4 +168,11 @@ unsafe struct AgentRecipeNote {
     public static int Opens;
     public static AgentRecipeNote* Instance() => (AgentRecipeNote*)Pointer;
     public void OpenRecipeByRecipeId(uint id) => Opens++;
+}
+
+partial class GatherStopHarness { public static GatherStopQueue? _queueProcessor; }
+class GatherStopQueue {
+    public bool Paused;
+    public string Reason = "";
+    public void Pause(string reason) { Paused = true; Reason = reason; }
 }

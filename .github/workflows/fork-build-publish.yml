@@ -1,4 +1,4 @@
-﻿name: Fork Build & Publish Dalamud Repo
+name: Fork Build & Publish Dalamud Repo
 
 on:
   pull_request:
@@ -131,7 +131,7 @@ jobs:
           if ($support -notmatch 'NodeList.Count > 0' -or $support -notmatch 'FishingSpots.Count > 0') {
             throw 'Concrete gathering-location validation is missing.'
           }
-          if ($support -notmatch 'MaxUnchangedGatherRecoveries' -or $support -notmatch 'infinite retry/honk loop') {
+          if ($support -notmatch 'MaxUnchangedGatherRecoveries' -or $support -notmatch 'MaxTotalGatherRecoveries') {
             throw 'Infinite gather/honk loop protection is missing.'
           }
           if ($support -notmatch 'ForkVulcanMobSources.GetEffectiveSource') {

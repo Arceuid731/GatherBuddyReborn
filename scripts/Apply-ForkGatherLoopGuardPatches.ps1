@@ -64,6 +64,9 @@ if ($bridge -notmatch 'TryAddAutoGatherTarget\(_gatherList') {
                 if (ForkVulcanWorkflowSupport.HasOutstandingGatherables(remainingMaterials))
                 {
                     var gatherableCount = ForkVulcanWorkflowSupport.CountOutstandingGatherables(remainingMaterials);
+                    if (PauseForKnownGatherStop(ForkVulcanWorkflowSupport.BuildGatherPlanSummary()))
+                        return;
+
                     if (ForkVulcanWorkflowSupport.TryRegisterGatherRecovery(
                             remainingMaterials,
                             out var outstandingSummary,

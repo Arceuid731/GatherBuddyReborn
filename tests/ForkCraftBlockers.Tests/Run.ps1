@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 # Compile the real state-transition methods against a minimal game boundary.
 # This exercises queue behavior without requiring a running Dalamud client.
 function Get-Method([string]$source, [string]$signature) {
@@ -27,6 +27,13 @@ $methods += 'partial class PlanHarness {' + (Get-Method $plan 'public void Refre
 $interop = Get-Content (Join-Path $PSScriptRoot '../../GatherBuddy/Crafting/CraftingGameInterop.cs') -Raw
 if ($interop.Contains('IsRecipeUnlocked(')) { throw 'Speculative recipe access check must not return.' }
 $methods += 'partial class SelectionHarness {' + (Get-Method $interop 'private static unsafe bool EnsureExpectedRecipeSelected()').Replace('private static unsafe bool', 'public static unsafe bool') + '}'
+$bridge = Get-Content (Join-Path $PSScriptRoot '../../GatherBuddy/Crafting/CraftingGatherBridge.cs') -Raw
+$methods += 'partial class GatherStopHarness {' + (Get-Method $bridge 'private static bool PauseForKnownGatherStop(').Replace('private static bool', 'public static bool') + '}'
+$gather = Get-Content (Join-Path $PSScriptRoot '../../GatherBuddy/AutoGather/AutoGather.cs') -Raw
+if (-not $gather.Contains('LastStopReason = null;') -or -not $gather.Contains('LastStopReason = status;')) { throw 'Gather stop reason must survive disable and reset on each new start.' }
+$gate = $bridge.IndexOf('if (PauseForKnownGatherStop(')
+$retry = $bridge.IndexOf('if (ForkVulcanWorkflowSupport.TryRegisterGatherRecovery(')
+if ($gate -lt 0 -or $retry -lt $gate) { throw 'Known gather failures must pause before recovery.' }
 New-Item -ItemType Directory (Join-Path $PSScriptRoot 'obj') -Force | Out-Null
 Set-Content (Join-Path $PSScriptRoot 'obj/QueueMethods.g.cs') $methods -Encoding utf8
 & dotnet run --project $PSScriptRoot -c Release

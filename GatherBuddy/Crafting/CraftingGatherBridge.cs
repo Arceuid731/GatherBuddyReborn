@@ -735,6 +735,19 @@ public static class CraftingGatherBridge
         }
     }
 
+    private static bool PauseForKnownGatherStop(string outstandingSummary)
+    {
+        var reason = GatherBuddy.AutoGather.LastStopReason;
+        if (string.IsNullOrWhiteSpace(reason) || _queueProcessor == null)
+            return false;
+
+        var message = $"Gathering paused: {reason}. Still needed: {outstandingSummary}. Press Resume when ready.";
+        GatherBuddy.Log.Warning($"[CraftingGatherBridge] {message}");
+        ForkVulcanWorkflowSupport.AddActivity(message, VulcanActivityKind.Warning);
+        _queueProcessor.Pause(message);
+        return true;
+    }
+
     public static void PauseQueue(string reason)
     {
         if (_isQueueMode && _queueProcessor is { Paused: false })

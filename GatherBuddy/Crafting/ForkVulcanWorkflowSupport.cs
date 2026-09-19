@@ -293,7 +293,7 @@ public static class ForkVulcanWorkflowSupport
 
         stopReason = string.IsNullOrWhiteSpace(outstandingSummary)
             ? "AutoGather ended without satisfying the crafting gather plan. Vulcan paused to prevent an infinite retry loop. Check the gather list and press Resume after resolving the issue."
-            : $"AutoGather ended without making enough progress on {outstandingSummary}. Vulcan paused to prevent an infinite retry/honk loop. Resolve the remaining material(s), then press Resume.";
+            : $"Gathering stopped before collecting {outstandingSummary}. The cause could not be determined. Check the GatherBuddy log, or obtain the missing materials, then press Resume.";
         return false;
     }
 
