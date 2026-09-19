@@ -1,4 +1,4 @@
-using Dalamud.Game.ClientState.Conditions;
+﻿using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI;
@@ -15,6 +15,8 @@ namespace GatherBuddy.Crafting;
 
 public static class CraftingGameInterop
 {
+    private static DateTime _recipeMismatchSince = DateTime.MinValue;
+    private static DateTime _lastRecipeReopen = DateTime.MinValue;
     private static readonly TimeSpan QuickSynthesisStartTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan QuickSynthesisCloseRetryDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan QuickSynthesisCloseTimeout = TimeSpan.FromSeconds(5);
@@ -22,6 +24,7 @@ public static class CraftingGameInterop
 
     public enum CraftPreparationFailureReason
     {
+        RecipeSelectionMismatch,
         MissingIngredientsUnableToSelect,
         MissingMaterialsUnableToQuickSynth,
     }
@@ -257,6 +260,8 @@ public static class CraftingGameInterop
         _currentState = CraftState.PreparingCraft;
         _taskManagerIdleSince = DateTime.MinValue;
         _lastPreparationFailure = null;
+        _recipeMismatchSince = DateTime.MinValue;
+        _lastRecipeReopen = DateTime.MinValue;
         GatherBuddy.Log.Debug($"[Crafting] StartCraft - entering PreparingCraft state (QuickSynth={useQuickSynthesis})");
         
         var tm = GatherBuddy.AutoGather?.TaskManager;
@@ -269,7 +274,13 @@ public static class CraftingGameInterop
         if (useQuickSynthesis)
         {
             tm.DelayNext(500);
-            tm.Enqueue(() => { ExecuteQuickSynthesis((int)quantity); return true; }, 3000, "ExecuteQuickSynthesis");
+            tm.Enqueue(() =>
+            {
+                if (!EnsureExpectedRecipeSelected())
+                    return _lastPreparationFailure != null ? (bool?)null : false;
+                ExecuteQuickSynthesis((int)quantity);
+                return true;
+            }, 3000, true, "ExecuteQuickSynthesis");
         }
         else
         {
@@ -289,7 +300,7 @@ public static class CraftingGameInterop
             if (recipeNote != null && recipeNote->RecipeList != null)
             {
                 var selectedRecipe = recipeNote->RecipeList->SelectedRecipe;
-                if (selectedRecipe != null && selectedRecipe->RecipeId == recipeId)
+                if (selectedRecipe != null && selectedRecipe->RecipeId == recipeId && IsExpectedRecipeSelected())
                 {
                     GatherBuddy.Log.Debug($"[Crafting] Recipe {recipeId} already selected, skipping OpenRecipe");
                     return true;
@@ -311,20 +322,60 @@ public static class CraftingGameInterop
         }
     }
 
-    private static unsafe bool WaitForRecipeOpen()
+    private static unsafe bool? WaitForRecipeOpen()
     {
-        try
+        if (EnsureExpectedRecipeSelected())
+            return true;
+        return _lastPreparationFailure != null ? null : false;
+    }
+
+    private static unsafe bool IsExpectedRecipeSelected()
+    {
+        if (!_currentRecipe.HasValue || !_currentRecipeId.HasValue)
+            return false;
+        var addon = (AtkUnitBase*)Dalamud.GameGui.GetAddonByName("RecipeNote").Address;
+        if (addon == null || !addon->IsVisible)
+            return false;
+        var note = FFXIVClientStructs.FFXIV.Client.Game.UI.RecipeNote.Instance();
+        var selected = note == null || note->RecipeList == null ? null : note->RecipeList->SelectedRecipe;
+        if (selected == null || selected->RecipeId != _currentRecipeId.Value || selected->ItemId != _currentRecipe.Value.ItemResult.RowId)
+            return false;
+        var expected = RecipeManager.GetIngredients(_currentRecipe.Value);
+        var displayed = new List<(uint itemId, int amount)>();
+        foreach (var ingredient in RecipeNoteExt.GetIngredientsSpan(selected))
+            if (ingredient.ItemId != 0 && ingredient.NumTotal > 0)
+                displayed.Add((ingredient.ItemId, ingredient.NumTotal));
+        return RecipeSelectionGuard.Matches(_currentRecipeId.Value, _currentRecipe.Value.ItemResult.RowId,
+            selected->RecipeId, selected->ItemId, expected, displayed);
+    }
+
+    private static unsafe bool EnsureExpectedRecipeSelected()
+    {
+        if (IsExpectedRecipeSelected())
         {
-            var addon = Dalamud.GameGui.GetAddonByName("RecipeNote");
-            if (addon != null && addon.Address != nint.Zero)
-            {
-                var atkUnit = (AtkUnitBase*)addon.Address;
-                if (atkUnit != null && atkUnit->IsVisible)
-                    return true;
-            }
+            _recipeMismatchSince = DateTime.MinValue;
+            return true;
         }
-        catch { }
-        
+        if (!_currentRecipeId.HasValue)
+            return false;
+        var now = DateTime.UtcNow;
+        if (_recipeMismatchSince == DateTime.MinValue)
+            _recipeMismatchSince = now;
+        if (now - _recipeMismatchSince >= TimeSpan.FromSeconds(2))
+        {
+            _lastPreparationFailure = new CraftPreparationFailure(_currentRecipeId.Value,
+                CraftPreparationFailureReason.RecipeSelectionMismatch, 0, 0, 0, 0,
+                "Crafting log selection does not match the requested recipe and ingredients.");
+            GatherBuddy.Log.Warning($"[Crafting] Recipe {_currentRecipeId.Value}: {_lastPreparationFailure.Details}");
+            return false;
+        }
+        if (now - _lastRecipeReopen >= TimeSpan.FromMilliseconds(500))
+        {
+            _lastRecipeReopen = now;
+            var agent = AgentRecipeNote.Instance();
+            if (agent != null)
+                agent->OpenRecipeByRecipeId(_currentRecipeId.Value);
+        }
         return false;
     }
 
@@ -365,6 +416,8 @@ public static class CraftingGameInterop
 
     private static unsafe IngredientAssignmentResult SelectIngredientsForCraft()
     {
+        if (!EnsureExpectedRecipeSelected())
+            return _lastPreparationFailure != null ? IngredientAssignmentResult.Fatal : IngredientAssignmentResult.Retry;
         try
         {
             var addon = Dalamud.GameGui.GetAddonByName("RecipeNote");
@@ -748,8 +801,10 @@ public static class CraftingGameInterop
         }
     }
 
-    private static unsafe bool ExecuteCraft()
+    private static unsafe bool? ExecuteCraft()
     {
+        if (!EnsureExpectedRecipeSelected())
+            return _lastPreparationFailure != null ? null : false;
         try
         {
             var addon = Dalamud.GameGui.GetAddonByName("RecipeNote");
@@ -773,6 +828,8 @@ public static class CraftingGameInterop
     
     public static unsafe void ExecuteQuickSynthesis(int quantity)
     {
+        if (!EnsureExpectedRecipeSelected())
+            return;
         try
         {
             var recipeNoteAddon = Dalamud.GameGui.GetAddonByName("RecipeNote");
@@ -1081,6 +1138,7 @@ public static class CraftingGameInterop
 
     private static unsafe bool AreIngredientsAssigned()
     {
+        if (!IsExpectedRecipeSelected()) return false;
         var recipeNote = FFXIVClientStructs.FFXIV.Client.Game.UI.RecipeNote.Instance();
         if (recipeNote == null || recipeNote->RecipeList == null || recipeNote->RecipeList->SelectedRecipe == null)
             return false;

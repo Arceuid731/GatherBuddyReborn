@@ -1,46 +1,35 @@
-﻿namespace GatherBuddy.Crafting;
+﻿using System;
+namespace GatherBuddy.Crafting;
 
-// Keep solver diagnostics out of player-facing messages. A recipe's displayed
-// level is not treated as a hard crafting requirement.
 public static class CraftBlockerMessage
 {
-    public static string BuildRepair(bool french, string job, int condition, int threshold)
-        => french
-            ? $"Réparation nécessaire — {job} : équipement à {condition} %, seuil {threshold} %. Faites réparer votre équipement, puis cliquez sur Reprendre. Pour la réparation automatique, vérifiez le niveau de réparation, la matière sombre ou l’accès à un réparateur et les gils."
-            : $"Repair needed — {job}: equipment at {condition}%, threshold {threshold}%. Repair your gear, then press Resume. For automatic repairs, check your repair level, dark matter or access to a mender and sufficient gil.";
+    public static string BuildRepair(string job, int condition, int threshold)
+        => $"Repair needed — {job}: equipment at {condition}%, threshold {threshold}%. Repair your gear, then press Resume. For automatic repairs, check your repair level, dark matter or access to a mender and sufficient gil.";
 
-    public static string Build(bool french, string item, string job, int level, int recipeLevel,
+    public static string BuildMaterials(string recipe, string item, int needed, int nq, int hq)
+        => nq + hq < needed
+            ? $"Missing materials for {recipe}: {item} — need {needed}, in bags {nq} NQ + {hq} HQ. Obtain {Math.Max(0, needed - nq - hq)} more, then press Resume."
+            : $"Cannot select the required material quality for {recipe}: {item} — in bags {nq} NQ + {hq} HQ. Check the NQ/HQ ingredient settings, then press Resume.";
+
+    public static string Build(string item, string job, int level, int recipeLevel,
         int craftsmanship, int control, int cp, int requiredCraftsmanship, int requiredControl,
         bool intermediate, bool noSolution)
     {
-        var reason = french
-            ? $"Fabrication bloquée : {item}. {job} niv. {level}, recette niv. {recipeLevel}."
-            : $"Crafting blocked: {item}. {job} level {level}, recipe level {recipeLevel}.";
-        if (level == 0)
-            reason += french ? $" Débloquez le métier {job}." : $" Unlock {job}.";
+        var reason = $"Crafting blocked: {item}. {job} level {level}, recipe level {recipeLevel}.";
+        if (level == 0) reason += $" Unlock {job}.";
         if (craftsmanship < requiredCraftsmanship)
-            reason += french
-                ? $" Habileté : {craftsmanship}/{requiredCraftsmanship} (manque {requiredCraftsmanship - craftsmanship})."
-                : $" Craftsmanship: {craftsmanship}/{requiredCraftsmanship} (missing {requiredCraftsmanship - craftsmanship}).";
+            reason += $" Craftsmanship: {craftsmanship}/{requiredCraftsmanship} (missing {requiredCraftsmanship - craftsmanship}).";
         if (control < requiredControl)
-            reason += french
-                ? $" Contrôle : {control}/{requiredControl} (manque {requiredControl - control})."
-                : $" Control: {control}/{requiredControl} (missing {requiredControl - control}).";
+            reason += $" Control: {control}/{requiredControl} (missing {requiredControl - control}).";
         if (noSolution)
         {
-            reason += french
-                ? $" Aucune rotation trouvée avec {craftsmanship} d’habileté, {control} de contrôle et {cp} PS."
-                : $" No rotation found with {craftsmanship} craftsmanship, {control} control and {cp} CP.";
+            reason += $" No rotation found with {craftsmanship} craftsmanship, {control} control and {cp} CP.";
             if (level < recipeLevel && level > 0)
-                reason += french ? " Le niveau du métier est inférieur à celui de la recette." : " Your job level is below the recipe level.";
+                reason += " Your job level is below the recipe level.";
         }
-        reason += french
-            ? " Vérifiez votre métier, votre équipement et vos réglages de fabrication, puis cliquez sur Reprendre."
-            : " Check your job, gear and crafting settings, then press Resume.";
+        reason += " Check your job, gear and crafting settings, then press Resume.";
         if (intermediate)
-            reason += french
-                ? $" Vous pouvez aussi obtenir {item} manuellement, dans la quantité et la qualité nécessaires, puis reprendre."
-                : $" You can also obtain {item} manually in the required quantity and quality, then resume.";
+            reason += $" You can also obtain {item} manually in the required quantity and quality, then resume.";
         return reason;
     }
 }

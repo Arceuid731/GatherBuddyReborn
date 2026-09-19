@@ -323,7 +323,8 @@ if ($queueContent -notmatch 'returning to material acquisition') {
         }
 
         _missingIngredientFailures.Remove(failure.RecipeId);
-        var pauseReason = $"Craft preparation still cannot assign materials for {itemName}: {failure.Details}. Fix or acquire the missing materials, then press Resume.";
+        var missingItemName = Dalamud.GameData.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRow(failure.ItemId).Name.ExtractText();
+        var pauseReason = CraftBlockerMessage.BuildMaterials(itemName, missingItemName, failure.Needed, failure.AvailableNQ, failure.AvailableHQ);
         GatherBuddy.Log.Warning($"[CraftingQueueProcessor] {pauseReason}");
         ForkVulcanWorkflowSupport.AddActivity(pauseReason, VulcanActivityKind.Error);
         _currentQueueIndex = 0;

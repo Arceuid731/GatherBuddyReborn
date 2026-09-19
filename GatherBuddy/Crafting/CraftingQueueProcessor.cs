@@ -296,9 +296,7 @@ public class CraftingQueueProcessor
             var jobName = jobRow.Name.ExtractText();
             var itemName = recipe.Value.ItemResult.Value.Name.ExtractText();
             _craftBlocked = true;
-            Pause(GatherBuddy.Language == global::Dalamud.Game.ClientLanguage.French
-                ? $"Fabrication bloquée : {itemName}. Débloquez le métier {jobName}, puis cliquez sur Reprendre."
-                : $"Crafting blocked: {itemName}. Unlock {jobName}, then press Resume.");
+            Pause( $"Crafting blocked: {itemName}. Unlock {jobName}, then press Resume.");
             return;
         }
 
@@ -804,6 +802,15 @@ public class CraftingQueueProcessor
         _craftHangSince = DateTime.MinValue;
         var recipe = RecipeManager.GetRecipe(failure.RecipeId);
         var itemName = recipe != null ? recipe.Value.ItemResult.Value.Name.ExtractText() : $"Recipe {failure.RecipeId}";
+        if (failure.Reason == CraftingGameInterop.CraftPreparationFailureReason.RecipeSelectionMismatch)
+        {
+            var reason = $"The crafting log did not load {itemName}. Close the crafting log, then press Resume to try again.";
+            _currentState = QueueState.WaitingForJobSwitch;
+            Pause(reason);
+            ForkVulcanWorkflowSupport.AddActivity(reason, VulcanActivityKind.Warning);
+            StateChanged?.Invoke(_currentState);
+            return true;
+        }
         var priorFailures = _missingIngredientFailures.GetValueOrDefault(failure.RecipeId);
         var failureContext = failure.Reason switch
         {
@@ -868,7 +875,6 @@ public class CraftingQueueProcessor
         var job = Dalamud.GameData.GetExcelSheet<ClassJob>().GetRow(jobId).Name.ExtractText();
         var stats = CraftingStateBuilder.GetCurrentPlayerStats();
         var reason = CraftBlockerMessage.Build(
-            GatherBuddy.Language == global::Dalamud.Game.ClientLanguage.French,
             recipe.Value.ItemResult.Value.Name.ExtractText(), job, stats.Level,
             recipe.Value.RecipeLevelTable.Value.ClassJobLevel, stats.Craftsmanship, stats.Control, stats.CP,
             recipe.Value.RequiredCraftsmanship, recipe.Value.RequiredControl, !item.IsOriginalRecipe, solverFailed);
@@ -1327,7 +1333,6 @@ public class CraftingQueueProcessor
     {
         var job = Dalamud.Objects.LocalPlayer?.ClassJob.Value.Name.ExtractText() ?? "";
         return CraftBlockerMessage.BuildRepair(
-            GatherBuddy.Language == global::Dalamud.Game.ClientLanguage.French,
             job, RepairManager.GetMinEquippedPercent(), GatherBuddy.Config.VulcanRepairConfig.RepairThreshold);
     }
 

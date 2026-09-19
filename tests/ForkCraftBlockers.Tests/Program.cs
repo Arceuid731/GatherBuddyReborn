@@ -22,13 +22,13 @@ single._executionPlan.Queue = [new(1136, true)];
 single._currentQueueIndex = 0;
 single.PauseFailedRaphaelItem(new(1136, true));
 Check(single._paused && single._currentQueueIndex == 0, "Failed final craft also stays blocked");
-var fr = CraftBlockerMessage.Build(true, "Madrier d’if", "Menuisier", 6, 21, 39, 9, 180, 0, 0, true, true);
-Check(fr.Contains("Menuisier niv. 6") && fr.Contains("recette niv. 21") && fr.Contains("manuellement"), "Low-level blocker identifies job, levels and manual alternative");
+var fr = CraftBlockerMessage.Build("Madrier d’if", "Menuisier", 6, 21, 39, 9, 180, 0, 0, true, true);
+Check(fr.Contains("Menuisier level 6") && fr.Contains("recipe level 21") && fr.Contains("manually"), "Low-level blocker identifies job, levels and manual alternative");
 Check(!fr.Contains("requis") && !fr.Contains("panicked"), "Displayed recipe level is not invented as a hard requirement");
-var stats = CraftBlockerMessage.Build(false, "Item", "Carpenter", 100, 100, 250, 180, 300, 300, 200, true, false);
+var stats = CraftBlockerMessage.Build("Item", "Carpenter", 100, 100, 250, 180, 300, 300, 200, true, false);
 Check(stats.Contains("250/300 (missing 50)") && stats.Contains("180/200 (missing 20)"), "Known stat requirements show exact deficits");
-var other = CraftBlockerMessage.Build(true, "Objet", "Alchimiste", 100, 20, 500, 400, 300, 0, 0, false, true);
-Check(!other.Contains("inférieur") && !other.Contains("manuellement"), "Solver failure does not invent a level deficit or a final-item Resume promise");
+var other = CraftBlockerMessage.Build("Objet", "Alchimiste", 100, 20, 500, 400, 300, 0, 0, false, true);
+Check(!other.Contains("below") && !other.Contains("manually"), "Solver failure does not invent a level deficit or a final-item Resume promise");
 var repairQueue = new QueueHarness { _currentState = QueueState.Repairing };
 repairQueue._tasks.Add(() => { repairQueue.TransitionFromRepairComplete(); return CraftingTasks.TaskResult.Done; });
 repairQueue.ProcessTasks();
@@ -50,8 +50,27 @@ retainerPause._tasks.Add(() => { retainerPause._paused = true; return CraftingTa
 retainerPause._tasks.Add(() => throw new Exception("Must not execute tasks after pause"));
 retainerPause.ProcessTasks();
 Check(retainerPause._tasks.Count == 1, "Pause without clearing consumes its completed callback once and stops processing");
-var repairText = CraftBlockerMessage.BuildRepair(true, "Couturier", 10, 20);
-Check(repairText.Contains("Couturier") && repairText.Contains("10 %") && repairText.Contains("20 %") && repairText.Contains("Reprendre"), "Repair explanation identifies equipped job, condition and next action");
+var repairText = CraftBlockerMessage.BuildRepair("Couturier", 10, 20);
+Check(repairText.Contains("Couturier") && repairText.Contains("10%") && repairText.Contains("20%") && repairText.Contains("Resume"), "Repair explanation identifies equipped job, condition and next action");
+var missing = CraftBlockerMessage.BuildMaterials("Elm Lumber", "Elm Log", 3, 1, 0);
+Check(missing.Contains("Obtain 2 more") && !missing.Contains("RecipeNote") && !missing.Contains("item 50"), "Missing-material message gives the actual deficit without internal jargon");
+var quality = CraftBlockerMessage.BuildMaterials("Item", "Material", 3, 0, 3);
+Check(quality.Contains("quality") && !quality.Contains("Obtain"), "Enough items with incompatible quality do not produce a false shortage");
+Check(RecipeSelectionGuard.Matches(1037, 100, 1037, 100, [(200, 3)], [(200, 3)]), "Correct recipe and ingredients accepted");
+Check(!RecipeSelectionGuard.Matches(1037, 100, 1037, 100, [(200, 3)], [(5056, 3)]), "Reported bronze-ingot mismatch rejected before inventory checks");
+Check(!RecipeSelectionGuard.Matches(1037, 100, 43, 100, [(200, 3)], [(200, 3)]), "Different recipe rejected even if ingredients match");
+Check(!RecipeSelectionGuard.Matches(1037, 100, 1037, 101, [(200, 3)], [(200, 3)]), "Stale result item rejected");
+Check(!RecipeSelectionGuard.Matches(1037, 100, 1037, 100, [(200, 3)], [(200, 1)]), "Stale ingredient quantity rejected");
+Check(!RecipeSelectionGuard.Matches(1037, 100, 1037, 100, [(200, 3)], []), "Empty ingredients during refresh are not considered ready");
+SelectionHarness.Ready = false;
+Check(!SelectionHarness.EnsureExpectedRecipeSelected() && AgentRecipeNote.Opens == 1, "Mismatch reopens requested recipe without reporting missing materials");
+SelectionHarness.EnsureExpectedRecipeSelected();
+Check(AgentRecipeNote.Opens == 1 && SelectionHarness._lastPreparationFailure == null, "Recipe reopen is throttled");
+SelectionHarness._recipeMismatchSince = DateTime.UtcNow.AddSeconds(-3);
+SelectionHarness.EnsureExpectedRecipeSelected();
+Check(SelectionHarness._lastPreparationFailure?.Reason == CraftPreparationFailureReason.RecipeSelectionMismatch, "Persistent mismatch produces selection failure, not material shortage");
+SelectionHarness.Ready = true;
+Check(SelectionHarness.EnsureExpectedRecipeSelected() && SelectionHarness._recipeMismatchSince == DateTime.MinValue, "Matching selection ends recovery wait");
 Console.WriteLine($"{passed} crafting blocker regression tests passed.");
 
 record RaphaelSolveRequest(uint RecipeId) { public string GetKey() => RecipeId.ToString(); }
@@ -106,3 +125,19 @@ static class CraftingTasks {
 }
 static class ForkVulcanWorkflowSupport { public static int Events; public static void AddActivity(string reason, VulcanActivityKind kind) => Events++; }
 enum VulcanActivityKind { Warning }
+
+partial class SelectionHarness {
+    public static bool Ready;
+    public static DateTime _recipeMismatchSince = DateTime.MinValue, _lastRecipeReopen = DateTime.MinValue;
+    public static uint? _currentRecipeId = 1037;
+    public static CraftPreparationFailure? _lastPreparationFailure;
+    static bool IsExpectedRecipeSelected() => Ready;
+}
+enum CraftPreparationFailureReason { RecipeSelectionMismatch }
+record CraftPreparationFailure(uint RecipeId, CraftPreparationFailureReason Reason, uint ItemId, int Needed, int NQ, int HQ, string Details);
+unsafe struct AgentRecipeNote {
+    static readonly nint Pointer = System.Runtime.InteropServices.Marshal.AllocHGlobal(1);
+    public static int Opens;
+    public static AgentRecipeNote* Instance() => (AgentRecipeNote*)Pointer;
+    public void OpenRecipeByRecipeId(uint id) => Opens++;
+}
