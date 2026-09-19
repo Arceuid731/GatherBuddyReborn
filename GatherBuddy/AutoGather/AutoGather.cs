@@ -2104,7 +2104,10 @@ namespace GatherBuddy.AutoGather
             if (GatherBuddy.Config.AutoGatherConfig.HonkMode)
                 Task.Run(() => _soundHelper.StartHonkSoundTask(3));
             CloseGatheringAddons();
-            if (GatherBuddy.Config.AutoGatherConfig.GoHomeWhenDone)
+            // Vulcan checks sanctuary safety after validating the remaining materials.
+            // Its gathering stage must not start a separate home-return first.
+            if (GatherBuddy.Config.AutoGatherConfig.GoHomeWhenDone
+                && CraftingGatherBridge.GetTemporaryGatherList() is not { Enabled: true })
                 EnqueueActionWithDelay(() => { GoHome(); });
             TaskManager.Enqueue(() =>
             {
